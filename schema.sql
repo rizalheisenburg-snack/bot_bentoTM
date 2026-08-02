@@ -18,24 +18,23 @@ CREATE TABLE IF NOT EXISTS orders (
     full_name      TEXT,
 
     -- State dapur
-    status         TEXT    NOT NULL DEFAULT 'PRE_CHECK',
-    -- PRE_CHECK | PARTIAL_PENDING | PENDING | CONFIRMED | PREPARING | DONE
-    -- | REJECTED | CANCELLED
+    status         TEXT    NOT NULL DEFAULT 'Diterima',
+    -- Diterima | Diproses | Siap | Dibatalkan
 
     -- Payment (terpisah dari state dapur)
     payment_status TEXT    NOT NULL DEFAULT 'UNPAID',  -- UNPAID | PAID
     paid_currency  TEXT,                               -- 'RIEL' | 'USD' (apa yang masuk laci)
     paid_at        TEXT,                               -- UTC datetime, wajib UTC
-    payment_method TEXT,                               -- 'CASH' | 'ABA' | 'VOUCHER'
+    payment_method TEXT,                               -- 'CASH' | 'ABA' 
 
-    -- Voucher
-    voucher_used   INTEGER DEFAULT 0,      -- 1 = voucher dipakai
-    voucher_value  INTEGER DEFAULT 0,      -- riel yang dipotong voucher (maks 10000)
+    -- -- Voucher
+    -- voucher_used   INTEGER DEFAULT 0,      -- 1 = voucher dipakai
+    -- voucher_value  INTEGER DEFAULT 0,      -- riel yang dipotong voucher (maks 10000)
 
     -- Harga (GENERATED supaya ga bisa drift manual)
     subtotal       INTEGER NOT NULL,       -- sum(line_total) sebelum voucher
-    discount       INTEGER GENERATED ALWAYS AS (voucher_value) STORED,
-    total          INTEGER GENERATED ALWAYS AS (subtotal - voucher_value) STORED,
+    -- discount       INTEGER GENERATED ALWAYS AS (voucher_value) STORED,
+    total          INTEGER GENERATED ALWAYS AS (subtotal) STORED,
 
     note           TEXT,
     admin_msg_id   INTEGER,                            -- message_id kartu order di chat admin

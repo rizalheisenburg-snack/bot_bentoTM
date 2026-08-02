@@ -8,7 +8,7 @@ import urllib.parse
 
 from config import BOT_TOKEN
 from db import get_conn
-from state_machine import VOUCHER_VALUE, apply_voucher, auto_pay_if_free
+from state_machine import auto_pay_if_free
 
 MAX_AGE = 86_400  # 24 jam anti-replay
 
@@ -38,19 +38,16 @@ def verify_init_data(init_data: str) -> dict | None:
 def checkout(
     user: dict,
     items: list[dict],
-    use_voucher: bool,
     note: str,
     payment_method: str = "CASH",
 ) -> dict:
     """
     items: [{"item_id": int, "qty": int}, ...]
-    use_voucher: True kalau customer mau pakai voucher fisik
+    Item yang habis/tidak ada otomatis dibuang dari order, sisanya tetap lanjut.
 
     Return:
-      {"ok": True, "order_id": int, "total": int, "voucher_result": dict|None}
+      {"ok": True, "order_id": int, "total": int, "unavailable_items": list}
       {"ok": False, "error": str}
-      {"ok": False, "error": "TOPUP_REQUIRED", "topup_needed": int}
-      {"ok": False, "error": "PARTIAL", "available_items": list, "order_id": int}
     """
     if not items:
         return {"ok": False, "error": "Keranjang kosong"}
@@ -82,31 +79,12 @@ def checkout(
     if not valid_items:
         return {"ok": False, "error": "Semua item tidak tersedia"}
 
-    # ── Voucher ────────────────────────────────────────────────────────────────
-    voucher_result = None
-    voucher_value = 0
-
-    if use_voucher:
-        voucher_result = apply_voucher(subtotal)
-        if voucher_result["result"] == "TOPUP_REQUIRED":
-            return {
-                "ok": False,
-                "error": "TOPUP_REQUIRED",
-                "topup_needed": voucher_result["topup_needed"],
-                "message": voucher_result["message"],
-            }
-        voucher_value = voucher_result["voucher_value"]
-
-    # ── VOUCHER cuma valid kalau total hasil hitungan server beneran 0 ─────────
-    # (client ga boleh nentuin gratis sendiri, server yang hitung)
-    if payment_method == "VOUCHER" and (subtotal - voucher_value) != 0:
+    # Voucher support is disabled; only Cash and ABA are accepted.
+    if payment_method == "VOUCHER":
         return {
             "ok": False,
-            "error": "Metode VOUCHER cuma bisa dipakai kalau total order 0. Pilih Cash atau ABA.",
+            "error": "Metode VOUCHER tidak tersedia. Pilih Cash atau ABA.",
         }
-
-    # ── Ada item habis sebagian → PARTIAL_PENDING ──────────────────────────────
-    initial_status = "PARTIAL_PENDING" if unavailable_items else "PENDING"
 
     user_id = user["id"]
     username = user.get("username", "")
@@ -115,16 +93,14 @@ def checkout(
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO orders
-               (user_id, username, full_name, status, subtotal, voucher_used, voucher_value, note, payment_method)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               (user_id, username, full_name, status, subtotal, note, payment_method)
+               VALUES (?,?,?,?,?,?,?)""",
             (
                 user_id,
                 username,
                 full_name,
-                initial_status,
+                "Diterima",
                 subtotal,
-                1 if use_voucher else 0,
-                voucher_value,
                 note,
                 payment_method,
             ),
@@ -136,47 +112,14 @@ def checkout(
         )
         conn.commit()
 
-    # Auto-pay kalau total = 0 (voucher pas)
+    # Auto-pay kalau total = 0
     auto_paid = auto_pay_if_free(order_id)
-
-    if unavailable_items:
-        return {
-            "ok": False,
-            "error": "PARTIAL",
-            "order_id": order_id,
-            "available_items": valid_items,
-            "unavailable_items": unavailable_items,
-            "subtotal": subtotal,
-            "voucher_result": voucher_result,
-        }
 
     return {
         "ok": True,
         "order_id": order_id,
         "subtotal": subtotal,
-        "voucher_value": voucher_value,
-        "total": subtotal - voucher_value,
+        "total": subtotal,
         "auto_paid": auto_paid,
-        "voucher_result": voucher_result,
+        "unavailable_items": unavailable_items,
     }
-
-
-def confirm_partial(order_id: int, user_id: int) -> dict:
-    """Customer setuju lanjut walau ada item yang dibuang."""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT status, user_id FROM orders WHERE id=?", (order_id,)
-        ).fetchone()
-        if not row:
-            return {"ok": False, "error": "Order tidak ditemukan"}
-        if row["user_id"] != user_id:
-            return {"ok": False, "error": "Forbidden"}
-        if row["status"] != "PARTIAL_PENDING":
-            return {"ok": False, "error": "Order bukan dalam status PARTIAL_PENDING"}
-
-        conn.execute(
-            "UPDATE orders SET status='PENDING', updated_at=datetime('now') WHERE id=?",
-            (order_id,),
-        )
-        conn.commit()
-    return {"ok": True, "order_id": order_id, "status": "PENDING"}

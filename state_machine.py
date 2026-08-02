@@ -3,96 +3,32 @@ from __future__ import annotations
 from db import get_conn
 
 # ── State dapur ───────────────────────────────────────────────────────────────
-# PRE_CHECK     : row baru lahir, server lagi validasi stok
-# PARTIAL_PENDING: ada item habis, nunggu customer terima/batal
-# PENDING       : order masuk, nunggu owner
-# CONFIRMED     : owner terima — window cancel customer TUTUP
-# PREPARING     : owner mulai masak
-# DONE          : selesai [terminal]
-# REJECTED      : owner tolak [terminal]
-# CANCELLED     : dibatalkan [terminal]
+# Diterima   : order masuk, nunggu owner — window cancel customer masih BUKA
+# Diproses   : owner terima & mulai masak — window cancel customer TUTUP
+# Siap       : selesai [terminal]
+# Dibatalkan : ditolak/dibatalkan (owner atau customer) [terminal]
 
 TRANSITIONS: dict[str, list[str]] = {
-    "PRE_CHECK":       ["PARTIAL_PENDING", "PENDING", "CANCELLED"],
-    "PARTIAL_PENDING": ["PENDING", "CANCELLED"],
-    "PENDING":         ["CONFIRMED", "REJECTED", "CANCELLED"],
-    "CONFIRMED":       ["PREPARING", "CANCELLED"],
-    "PREPARING":       ["DONE"],
-    "DONE":            [],
-    "REJECTED":        [],
-    "CANCELLED":       [],
+    "Diterima":   ["Diproses", "Dibatalkan"],
+    "Diproses":   ["Siap", "Dibatalkan"],
+    "Siap":       [],
+    "Dibatalkan": [],
 }
 
-TERMINAL = {"DONE", "REJECTED", "CANCELLED"}
+TERMINAL = {"Siap", "Dibatalkan"}
 
 STATUS_LABEL: dict[str, str] = {
-    "PRE_CHECK":       "🔄 Memproses",
-    "PARTIAL_PENDING": "⚠️ Item Sebagian Habis",
-    "PENDING":         "⏳ Menunggu Konfirmasi",
-    "CONFIRMED":       "✅ Dikonfirmasi",
-    "PREPARING":       "👨‍🍳 Sedang Dibuat",
-    "DONE":            "🎉 Selesai",
-    "REJECTED":        "❌ Ditolak Owner",
-    "CANCELLED":       "🚫 Dibatalkan",
+    "Diterima":   "⏳ Diterima",
+    "Diproses":   "👨‍🍳 Diproses",
+    "Siap":       "🎉 Siap",
+    "Dibatalkan": "🚫 Dibatalkan",
 }
-
-VOUCHER_VALUE = 10_000  # riel, fixed — ga ada kembalian, ga bisa nyimpen receh
-
-# ── Voucher logic ─────────────────────────────────────────────────────────────
-# 3 skenario:
-#   belanja > 10k  → potong 10k, sisanya bayar cash/transfer
-#   belanja = 10k  → total 0, GRATIS, auto-PAID
-#   belanja < 10k  → TOPUP_REQUIRED: customer harus genepin ke 10k atau batal
-
-
-def apply_voucher(subtotal: int) -> dict:
-    """
-    Return dict dengan field:
-      - ok: True selalu (voucher selalu diterima, beda hasilnya)
-      - result: 'APPLIED' | 'FREE' | 'TOPUP_REQUIRED'
-      - voucher_value: berapa riel yang dipotong (0 kalau TOPUP_REQUIRED)
-      - topup_needed: berapa riel yang harus ditambahin (0 kalau bukan TOPUP)
-      - total: subtotal setelah potongan
-      - message: pesan untuk customer
-    """
-    if subtotal > VOUCHER_VALUE:
-        return {
-            "ok": True,
-            "result": "APPLIED",
-            "voucher_value": VOUCHER_VALUE,
-            "topup_needed": 0,
-            "total": subtotal - VOUCHER_VALUE,
-            "message": f"Voucher dipotong {VOUCHER_VALUE:,} riel",
-        }
-    elif subtotal == VOUCHER_VALUE:
-        return {
-            "ok": True,
-            "result": "FREE",
-            "voucher_value": VOUCHER_VALUE,
-            "topup_needed": 0,
-            "total": 0,
-            "message": "GRATIS! Voucher menutup seluruh tagihan",
-        }
-    else:  # subtotal < VOUCHER_VALUE
-        topup = VOUCHER_VALUE - subtotal
-        return {
-            "ok": True,
-            "result": "TOPUP_REQUIRED",
-            "voucher_value": 0,
-            "topup_needed": topup,
-            "total": subtotal,
-            "message": (
-                f"Belanja kurang dari {VOUCHER_VALUE:,} riel. "
-                f"Tambah {topup:,} riel lagi atau batalkan order."
-            ),
-        }
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def can_customer_cancel(status: str) -> bool:
-    """Customer hanya boleh cancel selagi PENDING."""
-    return status == "PENDING"
+    """Customer hanya boleh cancel selagi Diterima."""
+    return status == "Diterima"
 
 
 def can_owner_cancel(status: str) -> bool:
@@ -130,7 +66,7 @@ def get_user_orders(user_id: int) -> list[dict]:
 def get_pending_orders() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM orders WHERE status='PENDING' ORDER BY created_at ASC"
+            "SELECT * FROM orders WHERE status='Diterima' ORDER BY created_at ASC"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -141,7 +77,7 @@ def get_latest_unpaid_order(user_id: int) -> dict | None:
         row = conn.execute(
             """SELECT * FROM orders
                WHERE user_id=? AND payment_status='UNPAID'
-                 AND status NOT IN ('REJECTED', 'CANCELLED')
+                 AND status != 'Dibatalkan'
                ORDER BY created_at DESC LIMIT 1""",
             (user_id,),
         ).fetchone()
@@ -182,7 +118,7 @@ def transition(order_id: int, new_status: str, actor: str = "owner") -> dict:
         current = row["status"]
 
         # Validasi cancel customer
-        if new_status == "CANCELLED" and actor == "customer":
+        if new_status == "Dibatalkan" and actor == "customer":
             if not can_customer_cancel(current):
                 return {
                     "ok": False,
@@ -219,7 +155,7 @@ def mark_paid(order_id: int, paid_currency: str = "RIEL") -> dict:
             return {"ok": False, "error": "Order tidak ditemukan"}
         if row["payment_status"] == "PAID":
             return {"ok": False, "error": "Order sudah lunas"}
-        if row["status"] in ("REJECTED", "CANCELLED"):
+        if row["status"] == "Dibatalkan":
             return {"ok": False, "error": "Order tidak valid untuk dilunasi"}
 
         conn.execute(
@@ -235,7 +171,7 @@ def mark_paid(order_id: int, paid_currency: str = "RIEL") -> dict:
 
 
 def auto_pay_if_free(order_id: int) -> bool:
-    """Kalau total=0 (voucher pas), langsung PAID otomatis. Return True kalau di-auto."""
+    """Kalau total=0, langsung PAID otomatis. Return True kalau di-auto."""
     with get_conn() as conn:
         row = conn.execute(
             "SELECT total, payment_status FROM orders WHERE id=?", (order_id,)
@@ -270,8 +206,7 @@ def get_omzet(bulan: int, tahun: int) -> dict:
                 COUNT(*)                                          AS total_order,
                 COALESCE(SUM(total), 0)                          AS omzet_riel,
                 SUM(CASE WHEN payment_status='PAID' THEN 1 ELSE 0 END) AS lunas,
-                SUM(CASE WHEN status='CANCELLED'    THEN 1 ELSE 0 END) AS batal,
-                SUM(CASE WHEN status='REJECTED'     THEN 1 ELSE 0 END) AS ditolak,
+                SUM(CASE WHEN status='Dibatalkan'   THEN 1 ELSE 0 END) AS batal,
                 SUM(CASE WHEN paid_currency='USD'   THEN 1 ELSE 0 END) AS bayar_usd
             FROM orders
             WHERE strftime('%Y-%m', paid_at) = ?
@@ -295,7 +230,6 @@ def get_omzet(bulan: int, tahun: int) -> dict:
         "omzet_riel": summary["omzet_riel"],
         "lunas": summary["lunas"],
         "batal": summary["batal"],
-        "ditolak": summary["ditolak"],
         "bayar_usd": summary["bayar_usd"],
         "top_items": [dict(r) for r in top_items],
     }

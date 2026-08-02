@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 from aiohttp import web
 
-from checkout_flow import checkout, confirm_partial, verify_init_data
+from checkout_flow import checkout, verify_init_data
 from config import OWNER_ID
 from db import get_conn, get_setting
 from state_machine import (
@@ -70,12 +70,11 @@ async def api_checkout(request):
         result = checkout(
             user=user,
             items=body.get("items", []),
-            use_voucher=bool(body.get("use_voucher", False)),
             note=note,
             payment_method=body.get("payment_method", "CASH"),
         )
-        # Kirim notif ke owner kalau order masuk (ok atau PARTIAL)
-        if result.get("ok") or result.get("error") == "PARTIAL":
+        # Kirim notif ke owner kalau order masuk
+        if result.get("ok"):
             await _notify_owner_new_order(request, result.get("order_id"))
         # Kirim mirror ke pelanggan untuk semua order sukses yang bukan auto-paid
         if result.get("ok") and not result.get("auto_paid"):
@@ -118,7 +117,7 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
     try:
         from owner_console import _order_text
         from state_machine import get_order
-        from config import ABA_QR_IMAGE_PATH, VOUCHER_QR_IMAGE_PATH
+        from config import ABA_QR_IMAGE_PATH
 
         o = get_order(order_id)
         if not o:
@@ -137,15 +136,11 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
 
         if o["total"] == 0:
             lines = [f"✅ Order #{o['id']} berhasil. Total 0៛, pesanan Anda telah diterima."]
-            if o.get("voucher_used"):
-                lines.append("📸 Reply pesan ini dengan screenshot bukti scan voucher.")
             await bot.send_message(
                 chat_id=o["user_id"],
                 text="\n\n".join(lines),
                 parse_mode="Markdown",
             )
-            if o.get("voucher_used"):
-                await _send_photo(VOUCHER_QR_IMAGE_PATH)
             return
 
         lines = [
@@ -154,8 +149,6 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
         proof_needed = []
         if o.get("payment_method") == "ABA":
             proof_needed.append("bukti transfer ABA")
-        if o.get("voucher_used"):
-            proof_needed.append("bukti scan voucher")
         if proof_needed:
             lines.append(f"📸 Reply pesan ini dengan screenshot {' & '.join(proof_needed)}.")
         text = "\n\n".join(lines)
@@ -168,22 +161,8 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
 
         if o.get("payment_method") == "ABA":
             await _send_photo(ABA_QR_IMAGE_PATH)
-        if o.get("voucher_used"):
-            await _send_photo(VOUCHER_QR_IMAGE_PATH)
     except Exception:
         log.exception("gagal kirim mirror order ke user")
-
-
-@routes.post("/api/checkout/confirm-partial")
-async def api_confirm_partial(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
-    body = await request.json()
-    result = confirm_partial(int(body.get("order_id", 0)), user["id"])
-    if result.get("ok"):
-        await _send_order_mirror_to_user(request, result.get("order_id"))
-    return _json(result, 200 if result["ok"] else 400)
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────
@@ -221,7 +200,7 @@ async def api_cancel_order(request):
         return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
     if o["user_id"] != user["id"] and user["id"] != OWNER_ID:
         return _json({"ok": False, "error": "Forbidden"}, 403)
-    result = transition(oid, "CANCELLED", actor="customer")
+    result = transition(oid, "Dibatalkan", actor="customer")
     if result.get("ok"):
         bot = request.app["bot"]
         if bot:

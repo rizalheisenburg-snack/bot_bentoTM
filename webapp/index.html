@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Warteg babi</title>
-  <link rel="icon" href="logo-babi.png" />
+  <title>Warteg JAGO MASAK</title>
+  <link rel="icon" href="jagomasak.jpg" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
 
@@ -14,7 +14,7 @@
 <div id="loading" class="screen active">
   <div class="loading-inner">
     <div class="logo">☕</div>
-    <div class="loading-text">WARTEG BABI</div>
+    <div class="loading-text">JAGO MASAK</div>
     <div class="spinner"></div>
   </div>
 </div>
@@ -22,7 +22,7 @@
 <!-- ── MENU ────────────────────────────────────────────────── -->
 <div id="screen-menu" class="screen">
   <div class="topbar">
-    <span class="topbar-title">Resto Babi KD</span>
+    <span class="topbar-title">Resto JAGO MASAK TM</span>
     <button class="icon-btn" id="btn-orders-icon">🧾 Pesananku</button>
   </div>
   <div id="closed-banner" class="closed-banner hidden">🌙 Warung lagi tutup — order belum bisa masuk dulu ya</div>
@@ -42,9 +42,6 @@
   </div>
   <div id="cart-items" class="cart-list"></div>
   <div class="cart-footer">
-
-    <button id="btn-toggle-voucher" class="btn-voucher">🎟 Pakai Voucher</button>
-    <div id="voucher-msg" class="voucher-msg"></div>
 
     <div class="address-section">
       <div class="addr-row">
@@ -71,17 +68,12 @@
     </div>
 
     <div class="price-summary">
-      <!-- <div class="price-row"><span>Subtotal</span><span id="sum-subtotal">0៛</span></div> -->
-      <!-- <div class="price-row discount-row hidden" id="discount-row">
-        <span>Voucher</span><span id="sum-discount" class="green">-0៛</span>
-      </div> -->
       <div class="price-row total-row"><span>Total</span><span id="sum-total">0៛</span></div>
     </div>
 
     <div class="pay-method-row">
       <button id="btn-pay-cash" class="btn-pay-method">💵 Cash</button>
-      <button id="btn-pay-aba"  class="btn-pay-method aba">🏦 ABA</button>
-      <button id="btn-pay-voucher" class="btn-pay-method voucher hidden">🎟 Selesaikan Order — 0៛</button>
+      <button id="btn-pay-aba" class="btn-pay-method aba">🏦 ABA</button>
     </div>
   </div>
 </div>
@@ -96,13 +88,6 @@
     <p id="aba-order-id" class="aba-order-id">Order #0</p>
     <p class="aba-hint">Scan QR di bawah, lalu transfer sesuai nominal total</p>
     <img src="aba-mat-baru.jpg" alt="ABA QR Code" class="aba-qr" />
-    <div id="aba-voucher-info" class="aba-voucher-info hidden">
-      <div class="price-summary">
-        <div class="price-row"><span>Subtotal</span><span id="aba-subtotal">0៛</span></div>
-        <div class="price-row"><span>Voucher</span><span id="aba-voucher-discount" class="green">-0៛</span></div>
-      </div>
-      <img src="voucer.jpg" alt="Voucher" class="aba-voucher-thumb" />
-    </div>
     <p id="aba-total" class="aba-total"></p>
     <p id="aba-total-usd" class="aba-total" style="font-size:14px;opacity:0.7"></p>
     <p class="aba-note">Nominal isi sendiri sesuai total order (QR tidak membawa nominal).</p>
@@ -119,17 +104,6 @@
     <div class="success-icon">🙏</div>
     <p id="aba-proof-text">Cek chat kamu dengan bot ini — ada pesan rincian order dari bot. Reply pesan itu dengan screenshot bukti transfer ABA kamu ya 🙏</p>
     <button id="btn-aba-proof-lanjut" class="btn-primary">Lanjut</button>
-  </div>
-</div>
-
-<!-- ── PARTIAL DIALOG ────────────────────────────────────────── -->
-<div id="screen-partial" class="screen" data-order-id="">
-  <div class="success-inner">
-    <div class="success-icon">⚠️</div>
-    <h2>Item Sebagian Habis</h2>
-    <p id="partial-body"></p>
-    <button id="btn-partial-confirm" class="btn-primary">Lanjut Tanpa Item Itu</button>
-    <button id="btn-partial-cancel" class="btn-secondary">Batalkan Order</button>
   </div>
 </div>
 
@@ -163,6 +137,6 @@
   <div id="order-detail-body" class="order-detail-body"></div>
 </div>
 
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

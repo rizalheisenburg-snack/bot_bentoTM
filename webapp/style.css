@@ -369,25 +369,6 @@ html, body {
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
-/* Voucher */
-.btn-voucher {
-  width: 100%; padding: 12px;
-  background: rgba(46, 124, 246, .10);
-  color: var(--blue2);
-  border: 1.5px dashed rgba(79, 172, 254, .5);
-  border-radius: 15px;
-  font-size: 14px; font-weight: 700; cursor: pointer;
-  transition: all .15s;
-}
-.btn-voucher.active {
-  background: var(--grad); color: #fff;
-  border-style: solid; border-color: transparent;
-  box-shadow: var(--glow);
-}
-.voucher-msg { font-size: 13px; margin-top: 6px; min-height: 18px; }
-.voucher-msg.ok { color: var(--green); }
-.voucher-msg.err { color: var(--red); }
-
 /* ── Address picker ───────────────────────────────────────────── */
 .address-section { margin-top: 12px; margin-bottom: 12px; }
 .addr-row {
@@ -453,8 +434,6 @@ html, body {
   font-size: 15px; font-weight: 800; color: var(--text); margin-top: 4px;
 }
 .total-row span:last-child { color: var(--blue2); font-size: 19px; }
-.discount-row { color: var(--green); }
-.discount-row.hidden { display: none; }
 .green { color: var(--green); }
 
 /* ── Buttons ──────────────────────────────────────────────────── */
@@ -493,10 +472,6 @@ html, body {
   background: var(--grad); color: #fff; border: none;
   box-shadow: var(--glow);
 }
-.btn-pay-method.voucher {
-  background: var(--grad); color: #fff; border: none;
-  box-shadow: var(--glow);
-}
 .btn-pay-method.hidden { display: none; }
 
 /* ── ABA screen ───────────────────────────────────────────────── */
@@ -519,13 +494,6 @@ html, body {
 .aba-order-id { font-size: 14px; font-weight: 700; color: var(--hint); margin-bottom: 4px; }
 .aba-note { color: var(--hint); font-size: 12px; text-align: center; margin: 12px 0 0; }
 .aba-btn-row { width: 100%; margin-top: 16px; }
-.aba-voucher-info { width: 100%; display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-.aba-voucher-info.hidden { display: none; }
-.aba-voucher-info .price-summary { flex: 1; margin-top: 0; border-top: none; padding-top: 0; }
-.aba-voucher-thumb {
-  width: 56px; height: 56px; object-fit: cover;
-  border-radius: 12px; border: 1px solid var(--line); flex-shrink: 0;
-}
 
 #screen-aba-proof .success-inner a.btn-primary {
   display: block; box-sizing: border-box;
@@ -534,7 +502,7 @@ html, body {
 #screen-aba-proof .success-inner p { margin-bottom: 20px; }
 
 /* ── Success screen ───────────────────────────────────────────── */
-#screen-success, #screen-aba-proof, #screen-partial {
+#screen-success, #screen-aba-proof {
   align-items: center; justify-content: center;
 }
 .success-inner { text-align: center; padding: 32px; max-width: 320px; }
@@ -564,13 +532,10 @@ html, body {
   border-radius: 999px; background: var(--card); color: var(--text);
   border: 1px solid var(--line);
 }
-.order-status-badge.pending   { background: rgba(251,191,36,.14); color: #FBBF24; border-color: rgba(251,191,36,.3); }
-.order-status-badge.confirmed { background: rgba(52,211,153,.14); color: var(--green); border-color: rgba(52,211,153,.3); }
-.order-status-badge.preparing { background: rgba(79,172,254,.14); color: var(--blue2); border-color: rgba(79,172,254,.3); }
-.order-status-badge.ready     { background: rgba(52,211,153,.14); color: var(--green); border-color: rgba(52,211,153,.3); }
-.order-status-badge.done      { background: rgba(255,255,255,.07); color: var(--hint); }
-.order-status-badge.cancelled { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
-.order-status-badge.rejected  { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
+.order-status-badge.diterima   { background: rgba(251,191,36,.14); color: #FBBF24; border-color: rgba(251,191,36,.3); }
+.order-status-badge.diproses   { background: rgba(79,172,254,.14); color: var(--blue2); border-color: rgba(79,172,254,.3); }
+.order-status-badge.siap       { background: rgba(52,211,153,.14); color: var(--green); border-color: rgba(52,211,153,.3); }
+.order-status-badge.dibatalkan { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
 .order-card-meta { color: var(--hint); font-size: 13px; margin-top: 8px; }
 .order-card-total { font-weight: 800; color: var(--blue2); margin-top: 5px; }
 .empty-orders { text-align: center; color: var(--hint); padding: 48px 0; }

@@ -34,16 +34,13 @@ USD_RATE = 4_000  # 1 USD = 4000 riel, statis
 PAYMENT_METHOD_LABEL: dict[str, str] = {
     "CASH": "💵 CASH",
     "ABA": "🏦 ABA",
-    "VOUCHER": "🎟 VOUCHER",
 }
 
 # Pesan notif ke customer per status (dipakai pas owner pencet tombol)
 CUSTOMER_STATUS_MSG: dict[str, str] = {
-    "CONFIRMED": "✅ *Order #{id} diterima!*\nPesananmu masuk antrian dapur.",
-    "PREPARING": "👨‍🍳 *Order #{id} lagi dimasak.*\nSebentar lagi jadi!",
-    "DONE":      "🎉 *Order #{id} selesai!*\nPesananmu siap / lagi diantar ke tujuan.",
-    "REJECTED":  "❌ *Order #{id} ditolak.*\nMaaf ya, hubungi admin untuk info lebih lanjut.",
-    "CANCELLED": "🚫 *Order #{id} dibatalkan.*",
+    "Diproses":   "👨‍🍳 *Order #{id} diterima & mulai dimasak!*\nSebentar lagi jadi!",
+    "Siap":       "🎉 *Order #{id} selesai!*\nPesananmu siap / lagi diantar ke tujuan.",
+    "Dibatalkan": "🚫 *Order #{id} dibatalkan.*",
 }
 
 
@@ -85,13 +82,12 @@ def _order_keyboard(order_id: int, status: str, payment_status: str) -> InlineKe
     state_btns = [
         InlineKeyboardButton(STATUS_LABEL[s], callback_data=f"status:{order_id}:{s}")
         for s in next_states
-        if s not in ("PARTIAL_PENDING",)  # owner ga punya aksi ini
     ]
     if state_btns:
         rows.append(state_btns)
 
     # Tombol lunas (kalau belum bayar dan order masih aktif)
-    if payment_status == "UNPAID" and status not in ("REJECTED", "CANCELLED"):
+    if payment_status == "UNPAID" and status != "Dibatalkan":
         rows.append([
             InlineKeyboardButton("💵 Lunas",  callback_data=f"paid:{order_id}:RIEL"),
            
@@ -205,7 +201,6 @@ async def cmd_omzet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Total Order  : {d['total_order']}\n"
         f"Lunas        : {d['lunas']}\n"
         f"Dibatalkan   : {d['batal']}\n"
-        f"Ditolak      : {d['ditolak']}\n"
         f"Bayar USD    : {d['bayar_usd']} transaksi\n\n"
         f"💰 *Omzet    : {riel(d['omzet_riel'])}*\n"
         f"   ≈ ${usd_equiv:,} (rate {USD_RATE:,})\n\n"

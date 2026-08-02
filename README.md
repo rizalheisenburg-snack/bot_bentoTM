@@ -12,8 +12,8 @@ This repository documents my independent QA process — from test planning to bu
 
 ### Core Features
 - **Order & Menu Management** — add/edit/delete menu items, toggle stock availability
-- **POS Cashier Flow** — dine-in/takeaway orders, item variations, receipt printing, price + voucher calculation
-- **Payment Processing** — supports Cash, ABA QR, and Voucher payment methods (including full-voucher zero-cash flow), with a payment state machine ensuring payment status stays independent from kitchen/order status
+- **POS Cashier Flow** — dine-in/takeaway orders, item variations, receipt printing, price calculation
+- **Payment Processing** — supports Cash and ABA QR payment methods, with a payment state machine ensuring payment status stays independent from kitchen/order status
 - **Admin Console** — real-time order mirroring, transaction void/cancellation handling
 - **Sales Reporting** — daily/monthly revenue recap, best-selling item tracking
 

@@ -21,8 +21,8 @@ Dokumen Test Plan ini menetapkan strategi, ruang lingkup, sumber daya, dan jadwa
 | Modul / Fitur | Akses Role | Skenario Pengujian Utama |
 | --- | --- | --- |
 | **Manajemen Menu & Harga** | Admin / Kasir | Tambah/Edit/Hapus menu (Babi balado,babi cabe ijo dll), ubah harga, toggle stok habis. |
-| **Pemesanan / POS Kasir** | Kasir / Waiter | Input order dine-in/takeaway, variasi lauk, cetak struk, kalkulasi total + voucer |
-| **Pembayaran (Payment)** | Kasir / Pelanggan | Transaksi Cash, QRIS, Transfer,voucer kalkulasi kembalian, serta void/pembatalan transaksi. |
+| **Pemesanan / POS Kasir** | Kasir / Waiter | Input order dine-in/takeaway, variasi lauk, cetak struk, kalkulasi total |
+| **Pembayaran (Payment)** | Kasir / Pelanggan | Transaksi Cash, QRIS, Transfer, kalkulasi kembalian, serta void/pembatalan transaksi. |
 | **Laporan Penjualan** | Owner / Admin | Rekap omzet harian/bulanan, laporan lauk terlaris, ekspor ke PDF/Excel. |
 |  |  |  |
 

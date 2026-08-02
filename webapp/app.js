@@ -10,7 +10,6 @@ const INIT_DATA = tg?.initData || "";
 /* ── State ────────────────────────────────────────────────────── */
 const cart = {};       // { item_id: { item, qty } }
 let menu = {};         // { category: [item, ...] }
-let useVoucher = false;
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 async function api(path, opts = {}) {
@@ -232,47 +231,16 @@ function renderCart() {
 
   updatePriceSummary();
   const empty = !entries.length;
-  document.getElementById("btn-pay-cash").disabled    = empty;
-  document.getElementById("btn-pay-aba").disabled     = empty;
-  document.getElementById("btn-pay-voucher").disabled = empty;
+  document.getElementById("btn-pay-cash").disabled = empty;
+  document.getElementById("btn-pay-aba").disabled = empty;
 }
 
 function updatePriceSummary() {
   const sub = cartSubtotal();
-  const disc = useVoucher ? 10_000 : 0;
-  const total = Math.max(0, sub - disc);
-
-  document.getElementById("sum-total").textContent = riel(total);
-
-  const isFreeVoucher = useVoucher && total === 0;
-  document.getElementById("btn-pay-cash").classList.toggle("hidden", isFreeVoucher);
-  document.getElementById("btn-pay-aba").classList.toggle("hidden", isFreeVoucher);
-  document.getElementById("btn-pay-voucher").classList.toggle("hidden", !isFreeVoucher);
+  document.getElementById("sum-total").textContent = riel(sub);
+  document.getElementById("btn-pay-cash").classList.remove("hidden");
+  document.getElementById("btn-pay-aba").classList.remove("hidden");
 }
-
-/* ── Voucher toggle ───────────────────────────────────────────── */
-document.getElementById("btn-toggle-voucher").addEventListener("click", () => {
-  useVoucher = !useVoucher;
-  const btn = document.getElementById("btn-toggle-voucher");
-  const msg = document.getElementById("voucher-msg");
-  btn.classList.toggle("active", useVoucher);
-  if (useVoucher) {
-    const sub = cartSubtotal();
-    if (sub < 10_000) {
-      useVoucher = false;
-      btn.classList.remove("active");
-      msg.className = "voucher-msg err";
-      msg.textContent = `Belanja minimal 10.000៛ untuk pakai voucher (kurang ${(10_000 - sub).toLocaleString("km-KH")}៛)`;
-    } else {
-      msg.className = "voucher-msg ok";
-      msg.textContent = "Voucher 10.000៛ aktif!";
-    }
-  } else {
-    msg.className = "voucher-msg";
-    msg.textContent = "";
-  }
-  updatePriceSummary();
-});
 
 /* ── Address picker ───────────────────────────────────────────── */
 let selectedAddr = "KD";
@@ -323,18 +291,16 @@ async function doCheckout(payMethod, onSuccess = showSuccess) {
 
   const result = await api("/api/checkout", {
     method: "POST",
-    body: JSON.stringify({ items, use_voucher: useVoucher, note, payment_method: payMethod }),
+    body: JSON.stringify({ items, note, payment_method: payMethod }),
   });
 
   if (result.ok) {
     clearCart();
+    if (result.unavailable_items?.length) {
+      const names = result.unavailable_items.map(i => i.item_name || `#${i.item_id}`).join(", ");
+      tg?.showAlert?.(`Item berikut habis dan tidak dimasukkan ke order: ${names}`);
+    }
     onSuccess(result);
-  } else if (result.error === "TOPUP_REQUIRED") {
-    show("screen-cart");
-    useVoucher = false;
-    updatePriceSummary();
-  } else if (result.error === "PARTIAL") {
-    showPartialDialog(result);
   } else {
     tg?.showAlert?.(result.error || "Checkout gagal, coba lagi.");
   }
@@ -355,22 +321,8 @@ document.getElementById("btn-pay-aba").addEventListener("click", async () => {
   btn.disabled = false; btn.textContent = "🏦 ABA";
 });
 
-document.getElementById("btn-pay-voucher").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-pay-voucher");
-  btn.disabled = true; btn.textContent = "Memproses...";
-  await doCheckout("VOUCHER", showSuccess);
-  btn.disabled = false; btn.textContent = "🎟 Selesaikan Order — 0៛";
-});
-
-// ABA screen flow is no longer active; keep markup commented out in HTML.
-
 function clearCart() {
   Object.keys(cart).forEach(k => delete cart[k]);
-  useVoucher = false;
-  document.getElementById("btn-toggle-voucher").classList.remove("active");
-  const msg = document.getElementById("voucher-msg");
-  msg.className = "voucher-msg";
-  msg.textContent = "";
   document.getElementById("note-input").value = "";
   document.getElementById("addr-custom").value = "";
   const firstChip = document.querySelector(".addr-chip");
@@ -383,34 +335,6 @@ function clearCart() {
   }
   updateCartFab();
 }
-
-/* ── Partial dialog ───────────────────────────────────────────── */
-function showPartialDialog(result) {
-  const unavail = result.unavailable_items.map(i => i.item_name).join(", ");
-  const body = document.getElementById("partial-body");
-  body.textContent = `Item berikut habis: ${unavail}. Lanjut order tanpa item ini?`;
-  document.getElementById("screen-partial").dataset.orderId = result.order_id;
-  show("screen-partial");
-}
-
-document.getElementById("btn-partial-confirm").addEventListener("click", async () => {
-  const oid = parseInt(document.getElementById("screen-partial").dataset.orderId);
-  const result = await api("/api/checkout/confirm-partial", {
-    method: "POST",
-    body: JSON.stringify({ order_id: oid }),
-  });
-  if (result.ok) {
-    showSuccess({ order_id: oid, total: 0 });
-  } else {
-    tg?.showAlert?.(result.error);
-  }
-});
-
-document.getElementById("btn-partial-cancel").addEventListener("click", async () => {
-  const oid = parseInt(document.getElementById("screen-partial").dataset.orderId);
-  await api(`/api/orders/${oid}/cancel`, { method: "POST" });
-  show("screen-cart");
-});
 
 /* ── Success screen ───────────────────────────────────────────── */
 function showSuccess(result) {
@@ -484,15 +408,11 @@ async function _fetchOrderDetail(id) {
     </div>`
   ).join("");
 
-  const discHtml = o.voucher_used
-    ? `<div class="detail-row"><span>Voucher</span><span class="green">-${riel(o.voucher_value)}</span></div>`
-    : "";
-
   const payHtml = o.payment_status === "PAID"
     ? `<div class="detail-row green"><span>Pembayaran</span><span>Lunas (${o.paid_currency || ""})</span></div>`
     : `<div class="detail-row" style="color:var(--red)"><span>Pembayaran</span><span>Belum Bayar</span></div>`;
 
-  const cancelHtml = o.status === "PENDING"
+  const cancelHtml = o.status === "Diterima"
     ? `<button id="btn-cancel-order" class="btn-cancel">🚫 Batalkan Order</button>
        <p class="cancel-hint">Bisa dibatalkan selama belum dikonfirmasi warung</p>`
     : "";

@@ -11,7 +11,7 @@ import server
 import state_machine
 
 from db import get_conn
-from checkout_flow import checkout, confirm_partial
+from checkout_flow import checkout
 from state_machine import get_order
 
 @pytest.fixture(autouse=True)
@@ -54,7 +54,6 @@ def test_checkout_cash_assigns_payment_method(fake_user, seeded_menu):
     result = checkout(
         user=fake_user,
         items=[{"item_id": 1, "qty": 1}],
-        use_voucher=False,
         note="[KD] test",
         payment_method="CASH",
     )
@@ -67,7 +66,6 @@ def test_checkout_aba_assigns_payment_method(fake_user, seeded_menu):
     result = checkout(
         user=fake_user,
         items=[{"item_id": 2, "qty": 1}],
-        use_voucher=False,
         note="[Transfer ABA] [KD] test",
         payment_method="ABA",
     )
@@ -76,79 +74,45 @@ def test_checkout_aba_assigns_payment_method(fake_user, seeded_menu):
     assert order["payment_method"] == "ABA"
     assert order["note"].startswith("[Transfer ABA]")
 
-@pytest.mark.parametrize("use_voucher, expected_total", [
-    (False, 15000),
-    (True, 5000),
-])
-def test_checkout_voucher_total(fake_user, seeded_menu, use_voucher, expected_total):
+def test_checkout_rejects_voucher_payment_method(fake_user, seeded_menu):
     result = checkout(
         user=fake_user,
         items=[{"item_id": 2, "qty": 1}],
-        use_voucher=use_voucher,
-        note="[KD] test",
-        payment_method="CASH",
-    )
-    assert result["ok"]
-    assert result["total"] == expected_total
-
-def test_checkout_voucher_free_total_is_paid(fake_user, seeded_menu):
-    result = checkout(
-        user=fake_user,
-        items=[{"item_id": 1, "qty": 2}],  # 2 x 5000 = 10000, pas voucher
-        use_voucher=True,
-        note="[KD] gratis voucher",
-        payment_method="VOUCHER",
-    )
-    assert result["ok"]
-    assert result["total"] == 0
-    assert result["auto_paid"] is True
-    order = get_order(result["order_id"])
-    assert order["payment_method"] == "VOUCHER"
-    assert order["payment_status"] == "PAID"
-
-def test_checkout_voucher_rejected_when_total_not_zero(fake_user, seeded_menu):
-    result = checkout(
-        user=fake_user,
-        items=[{"item_id": 2, "qty": 1}],  # 15000, voucher potong 10000, sisa 5000
-        use_voucher=True,
         note="[KD] test",
         payment_method="VOUCHER",
     )
     assert not result["ok"]
-    assert "VOUCHER" in result["error"]
+    assert "Cash atau ABA" in result["error"]
 
-def test_confirm_partial_succeeds_and_order_pending(fake_user, seeded_menu):
+def test_checkout_drops_unavailable_items_and_still_accepts_order(fake_user, seeded_menu):
+    with get_conn() as conn:
+        conn.execute("UPDATE menu_items SET available=0 WHERE id=2")
+        conn.commit()
+
     result = checkout(
         user=fake_user,
-        items=[{"item_id": 1, "qty": 1}],
-        use_voucher=False,
+        items=[{"item_id": 1, "qty": 1}, {"item_id": 2, "qty": 1}],
         note="[KD] test",
         payment_method="CASH",
     )
     assert result["ok"]
-
-    with get_conn() as conn:
-        conn.execute("UPDATE orders SET status='PARTIAL_PENDING' WHERE id=?", (result["order_id"],))
-        conn.commit()
-
-    confirm = confirm_partial(result["order_id"], fake_user["id"])
-    assert confirm["ok"]
+    assert result["total"] == 5000
+    assert len(result["unavailable_items"]) == 1
     order = get_order(result["order_id"])
-    assert order["status"] == "PENDING"
+    assert order["status"] == "Diterima"
 
-def test_auto_paid_order_no_mirror_needed(fake_user, seeded_menu):
+def test_cash_order_stays_unpaid(fake_user, seeded_menu):
     result = checkout(
         user=fake_user,
         items=[{"item_id": 1, "qty": 2}],
-        use_voucher=True,
-        note="[KD] gratis",
+        note="[KD] test",
         payment_method="CASH",
     )
     assert result["ok"]
-    assert result["total"] == 0
-    assert result["auto_paid"] is True
+    assert result["total"] == 10000
+    assert result["auto_paid"] is False
     order = get_order(result["order_id"])
-    assert order["payment_status"] == "PAID"
+    assert order["payment_status"] == "UNPAID"
 
 
 # ── Mirror order ke pelanggan (Task 2) ──────────────────────────────────────
@@ -175,17 +139,14 @@ def _fake_request(bot):
 def fake_qr_images(monkeypatch, tmp_path):
     aba_path = tmp_path / "aba.jpg"
     aba_path.write_bytes(b"ABA_QR_BYTES")
-    voucher_path = tmp_path / "voucher.jpg"
-    voucher_path.write_bytes(b"VOUCHER_QR_BYTES")
     monkeypatch.setattr(config, "ABA_QR_IMAGE_PATH", str(aba_path))
-    monkeypatch.setattr(config, "VOUCHER_QR_IMAGE_PATH", str(voucher_path))
 
 
 @pytest.mark.asyncio
 async def test_mirror_aba_no_voucher_sends_aba_qr_only(fake_user, seeded_menu, fake_qr_images):
     result = checkout(
         user=fake_user, items=[{"item_id": 2, "qty": 1}],
-        use_voucher=False, note="[Transfer ABA] [KD] test", payment_method="ABA",
+        note="[Transfer ABA] [KD] test", payment_method="ABA",
     )
     assert result["ok"] and not result["auto_paid"]
 
@@ -198,44 +159,42 @@ async def test_mirror_aba_no_voucher_sends_aba_qr_only(fake_user, seeded_menu, f
 
 
 @pytest.mark.asyncio
-async def test_mirror_aba_with_voucher_sends_both_qr(fake_user, seeded_menu, fake_qr_images):
+async def test_mirror_aba_sends_aba_qr_only(fake_user, seeded_menu, fake_qr_images):
     result = checkout(
         user=fake_user, items=[{"item_id": 2, "qty": 1}],
-        use_voucher=True, note="[Transfer ABA] [KD] test", payment_method="ABA",
+        note="[Transfer ABA] [KD] test", payment_method="ABA",
     )
-    assert result["ok"] and result["total"] == 5000 and not result["auto_paid"]
+    assert result["ok"] and result["total"] == 15000 and not result["auto_paid"]
 
     bot = _FakeBot()
     await server._send_order_mirror_to_user(_fake_request(bot), result["order_id"])
 
     assert len(bot.messages) == 1
     assert "bukti transfer" in bot.messages[0]
-    assert "bukti scan voucher" in bot.messages[0]
-    assert sorted(bot.photos) == sorted([b"ABA_QR_BYTES", b"VOUCHER_QR_BYTES"])
+    assert bot.photos == [b"ABA_QR_BYTES"]
 
 
 @pytest.mark.asyncio
-async def test_mirror_cash_with_voucher_sends_voucher_qr_only(fake_user, seeded_menu, fake_qr_images):
+async def test_mirror_cash_sends_no_photo(fake_user, seeded_menu, fake_qr_images):
     result = checkout(
         user=fake_user, items=[{"item_id": 2, "qty": 1}],
-        use_voucher=True, note="[KD] test", payment_method="CASH",
+        note="[KD] test", payment_method="CASH",
     )
-    assert result["ok"] and result["total"] == 5000 and not result["auto_paid"]
+    assert result["ok"] and result["total"] == 15000 and not result["auto_paid"]
 
     bot = _FakeBot()
     await server._send_order_mirror_to_user(_fake_request(bot), result["order_id"])
 
     assert len(bot.messages) == 1
     assert "bukti transfer" not in bot.messages[0]
-    assert "bukti scan voucher" in bot.messages[0]
-    assert bot.photos == [b"VOUCHER_QR_BYTES"]
+    assert bot.photos == []
 
 
 @pytest.mark.asyncio
 async def test_mirror_full_cash_no_voucher_sends_no_photo(fake_user, seeded_menu, fake_qr_images):
     result = checkout(
         user=fake_user, items=[{"item_id": 1, "qty": 1}],
-        use_voucher=False, note="[KD] test", payment_method="CASH",
+        note="[KD] test", payment_method="CASH",
     )
     assert result["ok"] and not result["auto_paid"]
 
@@ -248,17 +207,16 @@ async def test_mirror_full_cash_no_voucher_sends_no_photo(fake_user, seeded_menu
 
 
 @pytest.mark.asyncio
-async def test_mirror_auto_paid_with_voucher_sends_voucher_qr(fake_user, seeded_menu, fake_qr_images):
+async def test_mirror_cash_order_sends_no_photo(fake_user, seeded_menu, fake_qr_images):
     result = checkout(
-        user=fake_user, items=[{"item_id": 1, "qty": 2}],
-        use_voucher=True, note="[KD] gratis", payment_method="CASH",
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
     )
-    assert result["ok"] and result["total"] == 0 and result["auto_paid"] is True
+    assert result["ok"] and result["total"] == 5000 and not result["auto_paid"]
 
     bot = _FakeBot()
     await server._send_order_mirror_to_user(_fake_request(bot), result["order_id"])
 
     assert len(bot.messages) == 1
-    assert "Total 0" in bot.messages[0]
-    assert "bukti scan voucher" in bot.messages[0]
-    assert bot.photos == [b"VOUCHER_QR_BYTES"]
+    assert "bukti transfer" not in bot.messages[0]
+    assert bot.photos == []
