@@ -5,9 +5,9 @@ import logging
 from aiohttp import web
 
 from config import PORT
-from db import init_db
+from db import get_conn, init_db
 from owner_console import build_application
-from seed_menu import seed
+from seed_menu import seed_menu
 from server import build_app
 
 logging.basicConfig(
@@ -18,9 +18,12 @@ log = logging.getLogger(__name__)
 
 
 async def main():
-    # Init DB + seed
+    # Init DB + seed (cuma sekali, hindari duplikat menu tiap restart)
     init_db()
-    seed()
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM menu_items").fetchone()[0]
+        if count == 0:
+            seed_menu(conn)
 
     # Bot di-init dulu supaya bot.send_message bisa dipakai HTTP server
     tg_app = build_application()
