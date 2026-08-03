@@ -10,11 +10,10 @@ Sistem ordering buat Jakarta Cafe lewat **Telegram Mini App (TMA)**. Customer me
 |---|---|---|
 | **Customer** | Mini App (webview) | Liat menu, masukin cart, checkout, konfirm |
 | **Owner** | Bot Telegram (chat) | Terima/tolak order, masak, kelar, toggle stok, liat omzet, tandai lunas |
-| **Barber** | — | **Di-skip** (ga relevan buat cafe) |
 
 **Objektif:**
 - Customer: mesen low-friction, tau total + metode bayar sebelum konfirm.
-- Owner: omzet per-hari & per-bulan, operasional dari HP.
+- Owner: omzet per-hari & per-bulan, operasional dari HP/laptop.
 
 ---
 
@@ -25,8 +24,6 @@ Base currency = Riel Kamboja. Menu dihargain riel, omzet riel. **Alasan:** Riel 
 
 ### 💵 USD pakai rate STATIS 4000
 Customer boleh bayar cash/transfer USD, tapi **pembukuan selalu riel** — langsung dikonversi pakai rate tetap 4000/\$1. Ga ada input rate per-transaksi. `paid_currency` cuma nyatet duit fisik apa yang masuk (buat rekonsiliasi laci), angka di buku tetap riel.
-
-> **Catatan:** Fitur voucher (potongan 10k riel) yang tadinya ada di sini udah **di-strip**. Payment method cuma Cash & ABA sekarang.
 
 ### 🍳 Pembayaran TERPISAH dari state dapur
 Dapur (`Diterima → Diproses → Siap`) jalan sendiri, **ga pernah nungguin bayar**. `payment_status` (UNPAID/PAID) itu kolom independen, bukan state. Order diproses dulu walau belum bayar.
@@ -155,5 +152,37 @@ Semua udah dites end-to-end di SQLite asli (request sah lolos, palsu & basi dito
 
 ## 9. Sisa Roadmap
 
-- **Receipt printing** (step 5) — hook order DONE → RawBT thermal.
+- **Receipt printing** (step 5) — hook order Siap → RawBT thermal.
 - **Testing portfolio QA** — `state_machine.py` itu decision table siap jadi test case pytest (validasi desain + isi portfolio sekaligus).
+
+---
+
+## 10. Riwayat Perubahan (Changelog)
+
+### 2026-08-03 — Rebrand, hapus voucher, state machine Bahasa Indonesia, pindah repo
+
+**1. Rebrand ke Bento x Jago Masak**
+- Ganti title/logo/teks webapp dari "Warteg Babi" → "Jago Masak" (`webapp/index.html`).
+- Ganti total isi menu (`seed_menu.py`) jadi katalog Jago Masak (~80 item, 8 kategori: Paket Spesial, Menu Nasi, Paket Hoki, Ala Carte, Rice Bowl, Roti/Cemilan, Kerupuk/Keripik, Minuman).
+
+**2. Fitur voucher dihapus total**
+- Sebelumnya voucher udah separuh di-strip (payment method VOUCHER udah ditolak), tapi masih banyak kode mati nyisa: `apply_voucher()`, `VOUCHER_VALUE`, param `use_voucher`, label `VOUCHER` di owner console, `VOUCHER_QR_IMAGE_PATH`, CSS/JS voucher yang udah ga ada elemen HTML-nya.
+- Semua dihapus bersih dari `state_machine.py`, `checkout_flow.py`, `server.py`, `owner_console.py`, `config.py`, `webapp/app.js`, `webapp/style.css` + file gambar `voucer.jpg`.
+- Sekarang cuma Cash & ABA yang jadi metode bayar.
+
+**3. State machine diganti ke Bahasa Indonesia + disederhanakan**
+- Enum status order lama (8 state, Inggris): `PRE_CHECK`, `PARTIAL_PENDING`, `PENDING`, `CONFIRMED`, `PREPARING`, `DONE`, `REJECTED`, `CANCELLED`.
+- Diganti jadi 4 state Bahasa Indonesia: **`Diterima → Diproses → Siap`**, dengan **`Dibatalkan`** sebagai jalur keluar dari `Diterima` atau `Diproses`.
+- Konsekuensi: order yang sebagian item-nya habis sekarang **auto-accept** langsung ke `Diterima` (item habis di-drop, customer cuma dikasih notice) — ga ada lagi langkah konfirmasi terpisah (`confirm_partial()` dan dialog "Item Sebagian Habis" di webapp udah dihapus).
+- Laporan `/omzet` sekarang cuma nunjukin 1 angka "Dibatalkan" (gabungan reject + cancel), bukan 2 baris terpisah — ini keputusan sengaja, bukan bug.
+- File yang kena: `state_machine.py`, `checkout_flow.py`, `server.py`, `owner_console.py`, `webapp/app.js` + `index.html` + `style.css`, `test_checkout.py`, `schema.sql` (default kolom `status`).
+
+**4. Pindah rumah ke repo baru**
+- Remote `origin` diganti dari `pos-babi` → **`https://github.com/rizalheisenburg-snack/bot_bentoTM`** (repo lama ga disentuh/dihapus).
+- Semua perubahan di atas + kerjaan lama yang belum ke-commit digabung jadi satu commit, udah di-push ke branch `main` repo baru.
+
+**Status test:** semua 10 test di `test_checkout.py` lolos setelah tiap tahap perubahan.
+
+**Yang perlu diperhatiin ke depan:**
+- Kalau mau bedain lagi antara "ditolak owner" vs "dibatalkan customer/owner" di laporan omzet, perlu nambah balik pemisahan status atau kolom terpisah — sekarang sengaja digabung jadi satu (`Dibatalkan`).
+- Belum ada test baru khusus buat kasus "checkout dengan item habis sebagian" pakai payment ABA/auto-pay — test yang ada cuma cover payment CASH.

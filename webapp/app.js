@@ -8,8 +8,9 @@ tg?.setBackgroundColor?.("#14161D");
 const INIT_DATA = tg?.initData || "";
 
 /* ── State ────────────────────────────────────────────────────── */
-const cart = {};       // { item_id: { item, qty } }
+const cart = {};       // { item_id: { item, qty, note } }
 let menu = {};         // { category: [item, ...] }
+let minOrder = 0;      // ambang minimal order (riel) berdasar tier jarak customer, 0 = tanpa restriksi
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 async function api(path, opts = {}) {
@@ -21,6 +22,7 @@ async function api(path, opts = {}) {
 }
 
 const riel = n => `${Number(n).toLocaleString("km-KH")}៛`;
+const escapeAttr = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
 function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -207,6 +209,14 @@ document.getElementById("cart-items").addEventListener("click", e => {
   updateCartFab();
 });
 
+document.getElementById("cart-items").addEventListener("input", e => {
+  const input = e.target.closest(".cart-item-note-input");
+  if (!input) return;
+  const id = parseInt(input.dataset.id);
+  if (!cart[id]) return;
+  cart[id].note = input.value;
+});
+
 function renderCart() {
   const container = document.getElementById("cart-items");
   const entries = Object.values(cart);
@@ -214,30 +224,42 @@ function renderCart() {
   if (!entries.length) {
     container.innerHTML = `<div class="empty-cart">🛒 Keranjang kosong</div>`;
   } else {
-    container.innerHTML = entries.map(({ item, qty }) => `
+    container.innerHTML = entries.map(({ item, qty, note }) => `
       <div class="cart-item">
-        <span class="cart-emoji">${item.emoji || "☕"}</span>
-        <div class="cart-item-info">
-          <div class="cart-item-name">${item.name}</div>
-          <div class="cart-item-price">${riel(item.price)} × ${qty} = <strong>${riel(item.price * qty)}</strong></div>
+        <div class="cart-item-row">
+          <span class="cart-emoji">${item.emoji || "☕"}</span>
+          <div class="cart-item-info">
+            <div class="cart-item-name">${item.name}</div>
+            <div class="cart-item-price">${riel(item.price)} × ${qty} = <strong>${riel(item.price * qty)}</strong></div>
+          </div>
+          <div class="qty-control">
+            <button class="qty-btn minus" data-id="${item.id}">−</button>
+            <span class="qty-num">${qty}</span>
+            <button class="qty-btn plus" data-id="${item.id}">+</button>
+          </div>
         </div>
-        <div class="qty-control">
-          <button class="qty-btn minus" data-id="${item.id}">−</button>
-          <span class="qty-num">${qty}</span>
-          <button class="qty-btn plus" data-id="${item.id}">+</button>
-        </div>
+        <input type="text" class="cart-item-note-input" data-id="${item.id}"
+               placeholder="+ catatan untuk item ini (opsional)"
+               value="${escapeAttr(note || "")}" maxlength="200" />
       </div>`).join("");
   }
 
   updatePriceSummary();
   const empty = !entries.length;
-  document.getElementById("btn-pay-cash").disabled = empty;
-  document.getElementById("btn-pay-aba").disabled = empty;
+  const belowMin = minOrder > 0 && cartSubtotal() < minOrder;
+  document.getElementById("btn-pay-cash").disabled = empty || belowMin;
+  document.getElementById("btn-pay-aba").disabled = empty || belowMin;
 }
 
 function updatePriceSummary() {
   const sub = cartSubtotal();
   document.getElementById("sum-total").textContent = riel(sub);
+  const belowMin = minOrder > 0 && sub < minOrder && sub > 0;
+  const warning = document.getElementById("min-order-warning");
+  warning.classList.toggle("hidden", !belowMin);
+  if (belowMin) {
+    warning.textContent = `⚠️ Minimal order ${riel(minOrder)} untuk lokasimu — kurang ${riel(minOrder - sub)} lagi.`;
+  }
   document.getElementById("btn-pay-cash").classList.remove("hidden");
   document.getElementById("btn-pay-aba").classList.remove("hidden");
 }
@@ -283,7 +305,9 @@ document.getElementById("addr-custom").addEventListener("input", e => {
 
 /* ── Checkout ─────────────────────────────────────────────────── */
 async function doCheckout(payMethod, onSuccess = showSuccess) {
-  const items = Object.values(cart).map(({ item, qty }) => ({ item_id: item.id, qty }));
+  const items = Object.values(cart).map(({ item, qty, note }) => ({
+    item_id: item.id, qty, note: (note || "").trim(),
+  }));
   const noteBase = document.getElementById("note-input").value.trim();
   const addr = document.getElementById("addr-custom").value.trim() || selectedAddr;
   const noteWithAddr = `[${addr}] ${noteBase}`.trim();
@@ -401,10 +425,13 @@ async function _fetchOrderDetail(id) {
   if (!result.ok) { body.innerHTML = `<p style="padding:20px;color:var(--red)">Gagal memuat</p>`; return; }
   const o = result.order;
 
-  const itemsHtml = o.items.map(i =>
-    `<div class="detail-item-row">
-      <span>${i.item_name} × ${i.qty}</span>
-      <span>${riel(i.unit_price * i.qty)}</span>
+  const itemsHtml = o.items.map(i => `
+    <div class="detail-item-block">
+      <div class="detail-item-row">
+        <span>${i.item_name} × ${i.qty}</span>
+        <span>${riel(i.unit_price * i.qty)}</span>
+      </div>
+      ${i.item_note ? `<div class="detail-item-note">📝 ${i.item_note}</div>` : ""}
     </div>`
   ).join("");
 
@@ -415,6 +442,10 @@ async function _fetchOrderDetail(id) {
   const cancelHtml = o.status === "Diterima"
     ? `<button id="btn-cancel-order" class="btn-cancel">🚫 Batalkan Order</button>
        <p class="cancel-hint">Bisa dibatalkan selama belum dikonfirmasi warung</p>`
+    : "";
+
+  const changeMethodHtml = o.payment_status === "UNPAID"
+    ? `<button id="btn-change-method" class="btn-change-method">🔄 Ganti Metode Bayar (${o.payment_method || "CASH"})</button>`
     : "";
 
   body.innerHTML = `
@@ -428,6 +459,7 @@ async function _fetchOrderDetail(id) {
       ${payHtml}
       ${o.note ? `<div class="detail-note">📝 ${o.note}</div>` : ""}
     </div>
+    ${changeMethodHtml}
     ${cancelHtml}`;
 
   document.getElementById("btn-cancel-order")?.addEventListener("click", () => {
@@ -444,6 +476,29 @@ async function _fetchOrderDetail(id) {
       tg.showConfirm("Yakin mau batalkan order ini?", ok => { if (ok) doCancel(); });
     } else if (window.confirm("Yakin mau batalkan order ini?")) {
       doCancel();
+    }
+  });
+
+  document.getElementById("btn-change-method")?.addEventListener("click", () => {
+    const target = o.payment_method === "ABA" ? "CASH" : "ABA";
+    const label = target === "ABA" ? "🏦 ABA" : "💵 Cash";
+    const doChange = async () => {
+      const r = await api(`/api/orders/${id}/payment-method`, {
+        method: "POST",
+        body: JSON.stringify({ payment_method: target }),
+      });
+      if (r.ok) {
+        tg?.HapticFeedback?.notificationOccurred("success");
+        if (r.reminder) tg?.showAlert?.(r.reminder);
+        _fetchOrderDetail(id);
+      } else {
+        tg?.showAlert?.(r.error || "Gagal ganti metode bayar.");
+      }
+    };
+    if (tg?.showConfirm) {
+      tg.showConfirm(`Ganti metode bayar ke ${label}?`, ok => { if (ok) doChange(); });
+    } else if (window.confirm(`Ganti metode bayar ke ${label}?`)) {
+      doChange();
     }
   });
 }
@@ -507,9 +562,10 @@ document.querySelectorAll(".back-btn[data-target]").forEach(btn => {
 (async () => {
   show("loading");
   try {
-    const data = await api("/api/menu");
-    menu = data.categories || {};
-    document.getElementById("closed-banner")?.classList.toggle("hidden", data.open !== false);
+    const [menuData, minOrderData] = await Promise.all([api("/api/menu"), api("/api/min-order")]);
+    menu = menuData.categories || {};
+    minOrder = minOrderData.ok ? (minOrderData.min_order || 0) : 0;
+    document.getElementById("closed-banner")?.classList.toggle("hidden", menuData.open !== false);
     show("screen-menu");
     renderMenu();
   } catch {

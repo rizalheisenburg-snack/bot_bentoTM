@@ -1,18 +1,31 @@
 import sqlite3
 from importlib import reload
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
+from aiohttp.test_utils import TestClient, TestServer
 
 import config
 import checkout_flow
 import db
 import server
 import state_machine
+from get_initdata import generate_init_data
 
-from db import get_conn
+from db import get_conn, get_user_min_order, set_user_min_order
 from checkout_flow import checkout
-from state_machine import get_order
+from state_machine import (
+    CANCEL_REASONS,
+    change_payment_method,
+    force_cancel_order,
+    get_active_orders,
+    get_cancel_warning,
+    get_order,
+    mark_paid,
+    set_admin_msg_id,
+    transition,
+)
 
 @pytest.fixture(autouse=True)
 def temp_db(monkeypatch, tmp_path):
@@ -101,6 +114,28 @@ def test_checkout_drops_unavailable_items_and_still_accepts_order(fake_user, see
     order = get_order(result["order_id"])
     assert order["status"] == "Diterima"
 
+# ── Minimal order per lokasi ─────────────────────────────────────────────────
+
+def test_get_user_min_order_returns_none_when_never_set():
+    assert get_user_min_order(999) is None
+
+def test_set_user_min_order_roundtrip():
+    set_user_min_order(111, 20000, 1.2)
+    row = get_user_min_order(111)
+    assert row["min_order"] == 20000
+    assert row["distance_km"] == pytest.approx(1.2)
+
+def test_set_user_min_order_upserts_not_duplicates():
+    set_user_min_order(111, 20000, 1.2)
+    set_user_min_order(111, 40000, 8.5)
+    row = get_user_min_order(111)
+    assert row["min_order"] == 40000
+    assert row["distance_km"] == pytest.approx(8.5)
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) c FROM users WHERE user_id=111").fetchone()["c"]
+    assert count == 1
+
+
 def test_cash_order_stays_unpaid(fake_user, seeded_menu):
     result = checkout(
         user=fake_user,
@@ -115,6 +150,62 @@ def test_cash_order_stays_unpaid(fake_user, seeded_menu):
     assert order["payment_status"] == "UNPAID"
 
 
+# ── Catatan custom per item ──────────────────────────────────────────────────
+
+def test_checkout_saves_item_note(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1, "note": "gak pake bawang"}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    order = get_order(result["order_id"])
+    assert order["items"][0]["item_note"] == "gak pake bawang"
+
+def test_checkout_trims_whitespace_only_note_to_none(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1, "note": "   "}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    order = get_order(result["order_id"])
+    assert order["items"][0]["item_note"] is None
+
+def test_checkout_item_note_optional_backward_compat(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    order = get_order(result["order_id"])
+    assert order["items"][0]["item_note"] is None
+
+def test_checkout_drops_note_with_unavailable_item(fake_user, seeded_menu):
+    with get_conn() as conn:
+        conn.execute("UPDATE menu_items SET available=0 WHERE id=2")
+        conn.commit()
+
+    result = checkout(
+        user=fake_user,
+        items=[
+            {"item_id": 1, "qty": 1},
+            {"item_id": 2, "qty": 1, "note": "pedas ya"},
+        ],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    assert len(result["unavailable_items"]) == 1
+    order = get_order(result["order_id"])
+    assert len(order["items"]) == 1
+    assert order["items"][0]["item_id"] == 1
+
+
 # ── Mirror order ke pelanggan (Task 2) ──────────────────────────────────────
 
 class _FakeBot:
@@ -123,12 +214,16 @@ class _FakeBot:
     def __init__(self):
         self.messages = []
         self.photos = []
+        self.edits = []
 
-    async def send_message(self, chat_id, text, parse_mode=None):
+    async def send_message(self, chat_id, text, parse_mode=None, reply_to_message_id=None):
         self.messages.append(text)
 
     async def send_photo(self, chat_id, photo):
         self.photos.append(photo.read())
+
+    async def edit_message_text(self, chat_id, message_id, text, parse_mode=None, reply_markup=None):
+        self.edits.append(text)
 
 
 def _fake_request(bot):
@@ -220,3 +315,387 @@ async def test_mirror_cash_order_sends_no_photo(fake_user, seeded_menu, fake_qr_
     assert len(bot.messages) == 1
     assert "bukti transfer" not in bot.messages[0]
     assert bot.photos == []
+
+
+@pytest.mark.asyncio
+async def test_mirror_includes_item_note(fake_user, seeded_menu, fake_qr_images):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1, "note": "pedas banget ya"}],
+        note="[KD] test", payment_method="CASH",
+    )
+    assert result["ok"] and not result["auto_paid"]
+
+    bot = _FakeBot()
+    await server._send_order_mirror_to_user(_fake_request(bot), result["order_id"])
+
+    assert len(bot.messages) == 1
+    assert "pedas banget ya" in bot.messages[0]
+
+
+# ── Ganti metode pembayaran (Fase 1.3) ───────────────────────────────────────
+
+def test_change_payment_method_switches_cash_to_aba(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    r = change_payment_method(result["order_id"], "ABA")
+    assert r["ok"]
+    assert r["old_method"] == "CASH" and r["new_method"] == "ABA"
+    order = get_order(result["order_id"])
+    assert order["payment_method"] == "ABA"
+
+
+def test_change_payment_method_rejects_same_method(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    r = change_payment_method(result["order_id"], "CASH")
+    assert not r["ok"]
+    assert "sama" in r["error"]
+
+
+def test_change_payment_method_rejects_invalid_method(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    r = change_payment_method(result["order_id"], "VOUCHER")
+    assert not r["ok"]
+    assert "tidak valid" in r["error"]
+
+
+def test_change_payment_method_locked_after_paid(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    mark_paid(result["order_id"], "RIEL")
+    r = change_payment_method(result["order_id"], "ABA")
+    assert not r["ok"]
+    assert "terkunci" in r["error"]
+    order = get_order(result["order_id"])
+    assert order["payment_method"] == "CASH"
+
+
+def test_change_payment_method_allowed_regardless_of_kitchen_status(fake_user, seeded_menu):
+    """Beda dari cancel: ganti metode boleh selama UNPAID, tidak peduli status dapur."""
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    assert transition(order_id, "Diproses", actor="owner")["ok"]
+    assert transition(order_id, "Siap", actor="owner")["ok"]
+
+    r = change_payment_method(order_id, "ABA")
+    assert r["ok"], r.get("error")
+    order = get_order(order_id)
+    assert order["payment_method"] == "ABA"
+    assert order["status"] == "Siap"
+
+
+def test_change_payment_method_missing_order():
+    r = change_payment_method(999999, "ABA")
+    assert not r["ok"]
+    assert "tidak ditemukan" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_notify_owner_payment_method_change_sends_text_and_edits_card(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    set_admin_msg_id(result["order_id"], 555)
+    change_result = change_payment_method(result["order_id"], "ABA")
+    assert change_result["ok"]
+
+    bot = _FakeBot()
+    await server._notify_owner_payment_method_change(_fake_request(bot), result["order_id"], change_result)
+
+    assert len(bot.messages) == 1
+    assert "CASH" in bot.messages[0] and "ABA" in bot.messages[0]
+    assert len(bot.edits) == 1
+    assert "ABA" in bot.edits[0]
+
+
+# ── Cancel order / force-cancel (Fase 1.4) ───────────────────────────────────
+
+def test_force_cancel_bypasses_transitions_from_siap(fake_user, seeded_menu):
+    """Beda dari transition() biasa: force-cancel harus jalan walau TRANSITIONS['Siap'] kosong."""
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    assert transition(order_id, "Diproses", actor="owner")["ok"]
+    assert transition(order_id, "Siap", actor="owner")["ok"]
+
+    # transition() biasa tetap menolak (regresi check TRANSITIONS lama tidak berubah)
+    blocked = transition(order_id, "Dibatalkan", actor="owner")
+    assert not blocked["ok"]
+
+    r = force_cancel_order(order_id, "Stok habis")
+    assert r["ok"]
+    order = get_order(order_id)
+    assert order["status"] == "Dibatalkan"
+    assert order["cancel_reason"] == "Stok habis"
+
+
+def test_force_cancel_warning_when_paid(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    mark_paid(order_id, "RIEL")
+
+    r = force_cancel_order(order_id, "Request customer")
+    assert r["ok"]
+    assert r["warning"] is not None
+    assert "refund manual" in r["warning"]
+
+
+def test_force_cancel_no_warning_when_unpaid(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    r = force_cancel_order(result["order_id"], "Kesalahan input")
+    assert r["ok"]
+    assert r["warning"] is None
+
+
+def test_get_cancel_warning_matches_payment_status():
+    assert get_cancel_warning("PAID") is not None
+    assert get_cancel_warning("UNPAID") is None
+
+
+def test_force_cancel_rejects_invalid_reason(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    r = force_cancel_order(result["order_id"], "Alasan ngasal")
+    assert not r["ok"]
+    assert "tidak valid" in r["error"]
+    order = get_order(result["order_id"])
+    assert order["status"] != "Dibatalkan"
+
+
+def test_force_cancel_missing_order():
+    r = force_cancel_order(999999, "Stok habis")
+    assert not r["ok"]
+    assert "tidak ditemukan" in r["error"]
+
+
+def test_customer_cancel_still_blocked_outside_diterima(fake_user, seeded_menu):
+    """Regresi: window cancel customer tidak boleh berubah dari fase sebelumnya."""
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    assert transition(order_id, "Diproses", actor="owner")["ok"]
+
+    r = transition(order_id, "Dibatalkan", actor="customer")
+    assert not r["ok"]
+    assert "dikonfirmasi" in r["error"]
+
+
+@pytest.mark.asyncio
+async def test_notify_customer_force_cancel_sends_reason(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    cancel_result = force_cancel_order(order_id, "Stok habis")
+    assert cancel_result["ok"]
+
+    bot = _FakeBot()
+    await server._notify_customer_force_cancel(_fake_request(bot), order_id, cancel_result)
+
+    assert len(bot.messages) == 1
+    assert "Stok habis" in bot.messages[0]
+    assert f"#{order_id}" in bot.messages[0]
+
+
+# ── Kanban /admin + WebSocket (Fase 1.5) ─────────────────────────────────────
+
+def test_status_changed_at_defaults_to_created_at_on_checkout(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order = get_order(result["order_id"])
+    assert order["status_changed_at"] == order["created_at"]
+
+
+def test_status_changed_at_unaffected_by_mark_paid(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET status_changed_at='2020-01-01 00:00:00' WHERE id=?", (order_id,)
+        )
+        conn.commit()
+
+    mark_paid(order_id, "RIEL")
+    order = get_order(order_id)
+    assert order["status_changed_at"] == "2020-01-01 00:00:00"
+
+
+def test_status_changed_at_unaffected_by_change_payment_method(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET status_changed_at='2020-01-01 00:00:00' WHERE id=?", (order_id,)
+        )
+        conn.commit()
+
+    change_payment_method(order_id, "ABA")
+    order = get_order(order_id)
+    assert order["status_changed_at"] == "2020-01-01 00:00:00"
+
+
+def test_status_changed_at_updates_on_transition(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET status_changed_at='2020-01-01 00:00:00' WHERE id=?", (order_id,)
+        )
+        conn.commit()
+
+    transition(order_id, "Diproses", actor="owner")
+    order = get_order(order_id)
+    assert order["status_changed_at"] != "2020-01-01 00:00:00"
+
+
+def test_status_changed_at_updates_on_force_cancel(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET status_changed_at='2020-01-01 00:00:00' WHERE id=?", (order_id,)
+        )
+        conn.commit()
+
+    force_cancel_order(order_id, "Stok habis")
+    order = get_order(order_id)
+    assert order["status_changed_at"] != "2020-01-01 00:00:00"
+
+
+def test_get_active_orders_includes_diterima_regardless_of_age(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    with get_conn() as conn:
+        conn.execute("UPDATE orders SET created_at='2020-01-01 00:00:00' WHERE id=?", (order_id,))
+        conn.commit()
+
+    active_ids = [o["id"] for o in get_active_orders()]
+    assert order_id in active_ids
+
+
+def test_get_active_orders_excludes_old_terminal_status(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    force_cancel_order(order_id, "Stok habis")
+    with get_conn() as conn:
+        conn.execute("UPDATE orders SET created_at='2020-01-01 00:00:00' WHERE id=?", (order_id,))
+        conn.commit()
+
+    active_ids = [o["id"] for o in get_active_orders()]
+    assert order_id not in active_ids
+
+
+def test_get_active_orders_includes_today_terminal_status(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order_id = result["order_id"]
+    force_cancel_order(order_id, "Stok habis")
+
+    active_ids = [o["id"] for o in get_active_orders()]
+    assert order_id in active_ids
+
+
+def test_get_active_orders_attaches_items(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 2}],
+        note="[KD] test", payment_method="CASH",
+    )
+    order = next(o for o in get_active_orders() if o["id"] == result["order_id"])
+    assert len(order["items"]) == 1
+    assert order["items"][0]["item_name"] == "Item A"
+    assert order["items"][0]["qty"] == 2
+
+
+def test_get_active_orders_empty_when_no_orders():
+    assert get_active_orders() == []
+
+
+@pytest.mark.asyncio
+async def test_ws_admin_rejects_without_init_data():
+    app = server.build_app(bot=None)
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.get("/ws/admin")
+        assert resp.status == 403
+
+
+@pytest.mark.asyncio
+async def test_ws_admin_rejects_non_owner():
+    app = server.build_app(bot=None)
+    init_data = generate_init_data(config.BOT_TOKEN, config.OWNER_ID + 1)
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.get(f"/ws/admin?initData={quote(init_data, safe='')}")
+        assert resp.status == 403
+
+
+@pytest.mark.asyncio
+async def test_ws_admin_accepts_owner_and_broadcasts_order_update(fake_user, seeded_menu):
+    app = server.build_app(bot=None)
+    init_data = generate_init_data(config.BOT_TOKEN, config.OWNER_ID)
+    async with TestClient(TestServer(app)) as client:
+        async with client.ws_connect(f"/ws/admin?initData={quote(init_data, safe='')}") as ws:
+            result = checkout(
+                user=fake_user, items=[{"item_id": 1, "qty": 1}],
+                note="[KD] test", payment_method="CASH",
+            )
+            order_id = result["order_id"]
+            await server.broadcast_order_update(order_id)
+
+            msg = await ws.receive_json(timeout=2)
+            assert msg["type"] == "order_update"
+            assert msg["order"]["id"] == order_id
+
+
+@pytest.mark.asyncio
+async def test_ws_admin_broadcast_noop_without_clients():
+    # Tidak ada client connected — broadcast harus no-op, tidak boleh raise.
+    await server.broadcast_order_update(None)
+    await server.broadcast_order_update(999999)

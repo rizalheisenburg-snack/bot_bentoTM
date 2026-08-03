@@ -37,9 +37,11 @@ CREATE TABLE IF NOT EXISTS orders (
     total          INTEGER GENERATED ALWAYS AS (subtotal) STORED,
 
     note           TEXT,
+    cancel_reason  TEXT,                               -- alasan force-cancel admin (Stok habis/Request customer/Kesalahan input/Lainnya)
     admin_msg_id   INTEGER,                            -- message_id kartu order di chat admin
     created_at     TEXT DEFAULT (datetime('now')),     -- UTC
-    updated_at     TEXT DEFAULT (datetime('now'))      -- UTC
+    updated_at     TEXT DEFAULT (datetime('now')),     -- UTC
+    status_changed_at TEXT DEFAULT (datetime('now'))   -- UTC, cuma berubah saat kolom `status` berubah (buat timer kanban)
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -50,7 +52,15 @@ CREATE TABLE IF NOT EXISTS order_items (
     qty        INTEGER NOT NULL,
     unit_price INTEGER NOT NULL,           -- riel, snapshot saat checkout
     line_total INTEGER GENERATED ALWAYS AS (qty * unit_price) STORED,
+    item_note  TEXT,                       -- catatan custom per item, verbatim, tidak diparsing
     FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id     INTEGER PRIMARY KEY,
+    min_order   INTEGER NOT NULL,        -- ambang minimal order (riel) dari tier jarak terakhir
+    distance_km REAL,                    -- jarak snapshot saat share lokasi, buat referensi
+    updated_at  TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS payment_proofs (

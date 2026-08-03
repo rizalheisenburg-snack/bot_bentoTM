@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Kanban Admin — Warteg JAGO MASAK</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="admin.css?v=1" />
+</head>
+<body>
+
+<div id="forbidden" class="forbidden hidden">
+  <div class="forbidden-inner">
+    <div class="forbidden-icon">🚫</div>
+    <div>Akses ditolak — khusus admin.</div>
+  </div>
+</div>
+
+<div id="board-wrap" class="board-wrap hidden">
+  <div class="topbar">
+    <span class="topbar-title">📋 Kanban Order</span>
+    <span id="ws-status" class="ws-status offline">● offline</span>
+  </div>
+
+  <div class="board" id="board">
+    <div class="column" data-status="Diterima">
+      <div class="column-header"><span>⏳ Diterima</span><span class="column-count" id="count-Diterima">0</span></div>
+      <div class="column-body" id="col-Diterima"></div>
+    </div>
+    <div class="column" data-status="Diproses">
+      <div class="column-header"><span>👨‍🍳 Diproses</span><span class="column-count" id="count-Diproses">0</span></div>
+      <div class="column-body" id="col-Diproses"></div>
+    </div>
+    <div class="column" data-status="Siap">
+      <div class="column-header"><span>🎉 Siap</span><span class="column-count" id="count-Siap">0</span></div>
+      <div class="column-body" id="col-Siap"></div>
+    </div>
+    <div class="column" data-status="Dibatalkan">
+      <div class="column-header"><span>🚫 Dibatalkan</span><span class="column-count" id="count-Dibatalkan">0</span></div>
+      <div class="column-body" id="col-Dibatalkan"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Detail panel ─────────────────────────────────────────── -->
+<div id="detail-overlay" class="overlay hidden">
+  <div class="detail-panel">
+    <div class="detail-header">
+      <span id="detail-title">Order #</span>
+      <button id="btn-detail-close" class="icon-btn">✕</button>
+    </div>
+    <div id="detail-body" class="detail-body"></div>
+  </div>
+</div>
+
+<script src="admin.js?v=1"></script>
+</body>
+</html>

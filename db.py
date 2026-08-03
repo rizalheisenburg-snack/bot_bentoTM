@@ -34,6 +34,28 @@ def set_setting(key: str, value: str) -> None:
         conn.commit()
 
 
+def set_user_min_order(user_id: int, min_order: int, distance_km: float) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO users (user_id, min_order, distance_km, updated_at)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT(user_id) DO UPDATE SET
+                 min_order=excluded.min_order,
+                 distance_km=excluded.distance_km,
+                 updated_at=excluded.updated_at""",
+            (user_id, min_order, distance_km),
+        )
+        conn.commit()
+
+
+def get_user_min_order(user_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT min_order, distance_km FROM users WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def init_db() -> None:
     with open("schema.sql") as f:
         sql = f.read()
@@ -44,10 +66,20 @@ def init_db() -> None:
             conn.execute("ALTER TABLE orders ADD COLUMN admin_msg_id INTEGER")
         if "payment_method" not in cols:
             conn.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT")
+        if "cancel_reason" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN cancel_reason TEXT")
+        if "status_changed_at" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN status_changed_at TEXT")
+            conn.execute(
+                "UPDATE orders SET status_changed_at = created_at WHERE status_changed_at IS NULL"
+            )
         conn.execute(
             "UPDATE orders SET payment_method='ABA' WHERE note LIKE '[Transfer ABA]%'"
         )
         conn.execute(
             "UPDATE orders SET payment_method='CASH' WHERE payment_method IS NULL OR payment_method = ''"
         )
+        cols_oi = [r[1] for r in conn.execute("PRAGMA table_info(order_items)").fetchall()]
+        if "item_note" not in cols_oi:
+            conn.execute("ALTER TABLE order_items ADD COLUMN item_note TEXT")
         conn.commit()

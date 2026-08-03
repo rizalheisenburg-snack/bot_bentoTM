@@ -337,10 +337,19 @@ html, body {
   border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 10px;
-  display: flex; align-items: center; gap: 12px;
+  display: flex; flex-direction: column; gap: 8px;
   box-shadow: var(--shadow);
 }
+.cart-item-row { display: flex; align-items: center; gap: 12px; }
 .cart-item .qty-control { margin-top: 0; }
+.cart-item-note-input {
+  width: 100%; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--text);
+  font-size: 12.5px; outline: none; transition: border-color .15s;
+}
+.cart-item-note-input::placeholder { color: var(--hint); }
+.cart-item-note-input:focus { border-color: var(--blue); }
 .cart-item-info { flex: 1; min-width: 0; }
 .cart-item-name { font-weight: 700; font-size: 14px; }
 .cart-item-price { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
@@ -430,6 +439,12 @@ html, body {
   display: flex; justify-content: space-between; margin-bottom: 6px;
   font-size: 13.5px; color: var(--hint); font-weight: 600;
 }
+.min-order-warning {
+  margin-top: 8px; padding: 8px 12px; border-radius: 10px;
+  background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.3);
+  color: var(--red); font-size: 12.5px; font-weight: 600;
+}
+.min-order-warning.hidden { display: none; }
 .total-row {
   font-size: 15px; font-weight: 800; color: var(--text); margin-top: 4px;
 }
@@ -572,7 +587,8 @@ html, body {
   display: flex; justify-content: space-between;
   padding: 7px 0; border-bottom: 1px dashed rgba(255,255,255,.08); font-size: 14px;
 }
-.detail-item-row:last-child { border-bottom: none; }
+.detail-item-block:last-child .detail-item-row { border-bottom: none; }
+.detail-item-note { color: var(--hint); font-size: 12px; margin: 2px 0 6px 2px; }
 .detail-summary {
   background: linear-gradient(160deg, var(--card2), var(--card));
   border: 1px solid var(--line);
@@ -601,6 +617,18 @@ html, body {
 .cancel-hint {
   text-align: center; color: var(--hint); font-size: 12px; margin-top: 8px;
 }
+
+/* ── Ganti metode bayar ───────────────────────────────────────── */
+.btn-change-method {
+  width: 100%; margin-top: 16px; padding: 14px;
+  background: rgba(36, 129, 204, .12);
+  color: var(--blue2);
+  border: 1.5px solid rgba(36, 129, 204, .4);
+  border-radius: 15px;
+  font-size: 14.5px; font-weight: 800; cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-change-method:active { opacity: .7; }
 
 /* ── Banner warung tutup ──────────────────────────────────────── */
 .closed-banner {

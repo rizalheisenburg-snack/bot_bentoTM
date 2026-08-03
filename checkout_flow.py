@@ -42,7 +42,7 @@ def checkout(
     payment_method: str = "CASH",
 ) -> dict:
     """
-    items: [{"item_id": int, "qty": int}, ...]
+    items: [{"item_id": int, "qty": int, "note": str (optional, verbatim, tidak diparsing)}, ...]
     Item yang habis/tidak ada otomatis dibuang dari order, sisanya tetap lanjut.
 
     Return:
@@ -73,8 +73,9 @@ def checkout(
         if not m["available"]:
             unavailable_items.append({"item_id": item_id, "item_name": m["name"], "reason": "habis"})
             continue
+        item_note = (entry.get("note") or "").strip() or None
         subtotal += m["price"] * qty
-        valid_items.append((item_id, m["name"], qty, m["price"]))
+        valid_items.append((item_id, m["name"], qty, m["price"], item_note))
 
     if not valid_items:
         return {"ok": False, "error": "Semua item tidak tersedia"}
@@ -107,7 +108,7 @@ def checkout(
         )
         order_id = cur.lastrowid
         conn.executemany(
-            "INSERT INTO order_items (order_id, item_id, item_name, qty, unit_price) VALUES (?,?,?,?,?)",
+            "INSERT INTO order_items (order_id, item_id, item_name, qty, unit_price, item_note) VALUES (?,?,?,?,?,?)",
             [(order_id, *row) for row in valid_items],
         )
         conn.commit()
