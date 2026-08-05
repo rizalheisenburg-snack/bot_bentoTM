@@ -61,7 +61,10 @@ function renderBoard() {
   for (const status of STATUSES) {
     const list = byStatus[status].sort((a, b) => a.created_at.localeCompare(b.created_at));
     document.getElementById(`count-${status}`).textContent = list.length;
-    document.getElementById(`col-${status}`).innerHTML = list.map(cardHtml).join("");
+    document.getElementById(`tab-count-${status}`).textContent = list.length;
+    document.getElementById(`col-${status}`).innerHTML = list.length
+      ? list.map(cardHtml).join("")
+      : `<div class="column-empty">Belum ada order</div>`;
   }
 
   document.querySelectorAll(".card").forEach(el => {
@@ -72,18 +75,40 @@ function renderBoard() {
 function cardHtml(o) {
   const mins = minutesSince(o.status_changed_at);
   const stale = mins > 15;
-  const payIcon = o.payment_status === "PAID" ? "✅" : "❌";
+  const payChip = o.payment_status === "PAID"
+    ? `<span class="pay-chip paid">Lunas</span>`
+    : `<span class="pay-chip unpaid">Belum Bayar</span>`;
   const name = o.full_name || o.username || o.user_id;
   return `
     <div class="card ${stale ? "stale" : ""}" data-id="${o.id}">
       <div class="card-top">
         <span class="card-name">#${o.id} ${name}</span>
-        <span class="card-pay">${payIcon}</span>
+        ${payChip}
       </div>
       <div class="card-summary">${itemSummary(o.items)}</div>
       ${stale ? `<span class="card-timer">⏱ ${mins} menit</span>` : ""}
     </div>`;
 }
+
+/* ── Tab status: quick-jump + scroll-spy ───────────────────────── */
+document.getElementById("status-tabs").addEventListener("click", e => {
+  const tab = e.target.closest(".status-tab");
+  if (!tab) return;
+  document.querySelector(`.column[data-status="${tab.dataset.status}"]`)
+    ?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+});
+
+document.getElementById("board").addEventListener("scroll", () => {
+  const board = document.getElementById("board");
+  const cols = board.querySelectorAll(".column");
+  let current = cols[0];
+  for (const col of cols) {
+    if (col.offsetLeft - board.scrollLeft <= 40) current = col;
+  }
+  if (!current) return;
+  document.querySelectorAll(".status-tab").forEach(t =>
+    t.classList.toggle("active", t.dataset.status === current.dataset.status));
+}, { passive: true });
 
 /* ── Detail panel ─────────────────────────────────────────────── */
 function openDetail(id) {
@@ -206,11 +231,23 @@ function connectWS() {
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "order_update" && msg.order) {
+      const isNew = !orders[msg.order.id];
       orders[msg.order.id] = msg.order;
       renderBoard();
       if (currentDetailId === msg.order.id) renderDetail();
+      if (isNew) {
+        tg?.HapticFeedback?.notificationOccurred("success");
+        flashNewCard(msg.order.id);
+      }
     }
   };
+}
+
+function flashNewCard(id) {
+  const el = document.querySelector(`.card[data-id="${id}"]`);
+  if (!el) return;
+  el.classList.add("card-new");
+  setTimeout(() => el.classList.remove("card-new"), 2000);
 }
 
 function setWsStatus(online) {

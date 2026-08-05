@@ -14,6 +14,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
+    WebAppInfo,
 )
 from telegram.ext import (
     Application,
@@ -171,7 +172,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/menu — daftar harga menu\n"
         "/buka — buka warung \\(terima order\\)\n"
         "/tutup — tutup warung \\(blok checkout\\)\n"
-        "/push \\<user\\_id\\> \\[pesan\\] — kirim promo ke user",
+        "/push \\<user\\_id\\> \\[pesan\\] — kirim promo ke user\n"
+        "/admin — buka Kanban order",
         parse_mode="MarkdownV2",
     )
 
@@ -332,6 +334,18 @@ async def cmd_push(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Kartu terkirim ke user {target_uid}")
     except Exception as e:
         await update.message.reply_text(f"Gagal kirim: {e}")
+
+
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _is_owner(update):
+        return
+    admin_url = WEBAPP_URL.rstrip("/") + "/admin"
+    await update.message.reply_text(
+        "📋 Kanban order — tap tombol di bawah buat buka.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📋 Buka Kanban", web_app=WebAppInfo(url=admin_url))
+        ]]),
+    )
 
 
 # ── Bukti transfer ────────────────────────────────────────────────────────────
@@ -538,6 +552,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("buka",    cmd_buka))
     app.add_handler(CommandHandler("tutup",   cmd_tutup))
     app.add_handler(CommandHandler("push",    cmd_push))
+    app.add_handler(CommandHandler("admin",   cmd_admin))
     app.add_handler(MessageHandler(filters.PHOTO, handle_payment_proof))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_fallback))
