@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS orders (
 
     -- State dapur
     status         TEXT    NOT NULL DEFAULT 'Diterima',
-    -- Diterima | Diproses | Siap | Dibatalkan
+    -- Diterima | Diproses | Siap | Selesai | Dibatalkan
 
     -- Payment (terpisah dari state dapur)
     payment_status TEXT    NOT NULL DEFAULT 'UNPAID',  -- UNPAID | PAID

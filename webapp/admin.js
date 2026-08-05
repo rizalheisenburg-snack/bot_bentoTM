@@ -6,9 +6,9 @@ tg?.expand();
 const INIT_DATA = tg?.initData || "";
 
 /* ── State ────────────────────────────────────────────────────── */
-const STATUSES = ["Diterima", "Diproses", "Siap", "Dibatalkan"];
-const NEXT_STATUS = { Diterima: "Diproses", Diproses: "Siap" };
-const NEXT_LABEL = { Diproses: "👨‍🍳 Mulai Masak", Siap: "🎉 Tandai Siap" };
+const STATUSES = ["Diterima", "Diproses", "Siap", "Selesai", "Dibatalkan"];
+const NEXT_STATUS = { Diterima: "Diproses", Diproses: "Siap", Siap: "Selesai" };
+const NEXT_LABEL = { Diproses: "👨‍🍳 Mulai Masak", Siap: "🎉 Tandai Siap", Selesai: "✅ Tandai Selesai" };
 const CANCEL_REASONS = ["Stok habis", "Request customer", "Kesalahan input", "Lainnya"];
 const STALE_MS = 15 * 60 * 1000;
 

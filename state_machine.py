@@ -5,22 +5,25 @@ from db import get_conn
 # ── State dapur ───────────────────────────────────────────────────────────────
 # Diterima   : order masuk, nunggu owner — window cancel customer masih BUKA
 # Diproses   : owner terima & mulai masak — window cancel customer TUTUP
-# Siap       : selesai [terminal]
+# Siap       : makanan udah jadi, nunggu diambil/diantar customer
+# Selesai    : udah diambil/diantar customer [terminal]
 # Dibatalkan : ditolak/dibatalkan (owner atau customer) [terminal]
 
 TRANSITIONS: dict[str, list[str]] = {
     "Diterima":   ["Diproses", "Dibatalkan"],
     "Diproses":   ["Siap", "Dibatalkan"],
-    "Siap":       [],
+    "Siap":       ["Selesai"],
+    "Selesai":    [],
     "Dibatalkan": [],
 }
 
-TERMINAL = {"Siap", "Dibatalkan"}
+TERMINAL = {"Selesai", "Dibatalkan"}
 
 STATUS_LABEL: dict[str, str] = {
     "Diterima":   "⏳ Diterima",
     "Diproses":   "👨‍🍳 Diproses",
     "Siap":       "🎉 Siap",
+    "Selesai":    "✅ Selesai",
     "Dibatalkan": "🚫 Dibatalkan",
 }
 
@@ -84,15 +87,15 @@ def get_pending_orders() -> list[dict]:
 
 def get_active_orders() -> list[dict]:
     """
-    Order buat kanban /admin: Diterima/Diproses selalu tampil apapun umurnya
-    (masih actionable), Siap/Dibatalkan (terminal) cuma yang hari ini —
-    supaya kolom terminal tidak numpuk order lama selamanya.
+    Order buat kanban /admin: Diterima/Diproses/Siap selalu tampil apapun umurnya
+    (masih actionable, nunggu ditandain Selesai), Selesai/Dibatalkan (terminal)
+    cuma yang hari ini — supaya kolom terminal tidak numpuk order lama selamanya.
     """
     with get_conn() as conn:
         orders = conn.execute("""
             SELECT * FROM orders
-            WHERE status IN ('Diterima', 'Diproses')
-               OR (status IN ('Siap', 'Dibatalkan') AND date(created_at) = date('now'))
+            WHERE status IN ('Diterima', 'Diproses', 'Siap')
+               OR (status IN ('Selesai', 'Dibatalkan') AND date(created_at) = date('now'))
             ORDER BY created_at ASC
         """).fetchall()
         if not orders:

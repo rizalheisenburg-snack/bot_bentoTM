@@ -527,6 +527,7 @@ html, body {
 .order-status-badge.diterima   { background: rgba(251,191,36,.14); color: #FBBF24; border-color: rgba(251,191,36,.3); }
 .order-status-badge.diproses   { background: rgba(79,172,254,.14); color: var(--blue2); border-color: rgba(79,172,254,.3); }
 .order-status-badge.siap       { background: rgba(52,211,153,.14); color: var(--green); border-color: rgba(52,211,153,.3); }
+.order-status-badge.selesai    { background: rgba(138,145,163,.14); color: var(--hint); border-color: rgba(138,145,163,.3); }
 .order-status-badge.dibatalkan { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
 .order-card-meta { color: var(--hint); font-size: 13px; margin-top: 8px; }
 .order-card-total { font-weight: 800; color: var(--blue2); margin-top: 5px; }

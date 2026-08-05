@@ -108,6 +108,7 @@ html, body {
 .column[data-status="Diterima"]   { border-top-color: var(--amber); }
 .column[data-status="Diproses"]   { border-top-color: var(--blue2); }
 .column[data-status="Siap"]       { border-top-color: var(--green); }
+.column[data-status="Selesai"]    { border-top-color: var(--hint); }
 .column[data-status="Dibatalkan"] { border-top-color: var(--red); }
 
 .column-header {
@@ -124,6 +125,7 @@ html, body {
 .column[data-status="Diterima"]   .column-count { background: rgba(251,191,36,.15); color: var(--amber); }
 .column[data-status="Diproses"]   .column-count { background: rgba(79,172,254,.15); color: var(--blue2); }
 .column[data-status="Siap"]       .column-count { background: rgba(52,211,153,.15); color: var(--green); }
+.column[data-status="Selesai"]    .column-count { background: rgba(138,145,163,.15); color: var(--hint); }
 .column[data-status="Dibatalkan"] .column-count { background: rgba(248,113,113,.15); color: var(--red); }
 
 .column-body {
