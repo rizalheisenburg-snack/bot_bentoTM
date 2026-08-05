@@ -30,7 +30,6 @@ function show(id) {
 }
 
 /* ── Menu screen ──────────────────────────────────────────────── */
-let currentCategory = null;
 let searchQuery = "";
 
 function categorySlug(name) {
@@ -73,33 +72,61 @@ function menuCardHtml(item) {
     </div>`;
 }
 
-// Rebangun kontrol (search + tombol back) cuma kalau state-nya beneran berubah,
+// Search box + tab kategori dibangun sekali aja (menu gak berubah tiap render),
 // biar input search nggak kehilangan fokus tiap kali user ngetik satu huruf.
 function renderControls() {
   const tabs = document.getElementById("category-tabs");
-  const showBack = !!currentCategory;
-  if (document.getElementById("menu-search") && tabs.dataset.hasBack === String(showBack)) {
-    return;
-  }
-  tabs.dataset.hasBack = String(showBack);
+  if (document.getElementById("menu-search")) return;
+
+  const catTabsHtml = Object.keys(menu).map((cat, i) =>
+    `<button class="cat-tab ${i === 0 ? "active" : ""}" data-cat="${cat}">${cat}</button>`
+  ).join("");
+
   tabs.innerHTML = `
     <div class="menu-controls">
       <div class="search-box">
         <span class="search-icon">🔍</span>
         <input id="menu-search" class="menu-search" type="search" placeholder="Cari menu..." value="${searchQuery}" autocomplete="off" />
       </div>
-      ${showBack ? `<button id="btn-back-cats" class="btn-cats-back">‹ Semua</button>` : ""}
     </div>
+    <div class="cat-tabs-row" id="cat-tabs-row">${catTabsHtml}</div>
   `;
+
   document.getElementById("menu-search").addEventListener("input", e => {
     searchQuery = e.target.value;
     renderList();
   });
-  document.getElementById("btn-back-cats")?.addEventListener("click", () => {
-    currentCategory = null;
-    searchQuery = "";
-    renderMenu();
+
+  document.getElementById("cat-tabs-row").addEventListener("click", e => {
+    const tab = e.target.closest(".cat-tab");
+    if (!tab) return;
+    if (searchQuery) {
+      searchQuery = "";
+      document.getElementById("menu-search").value = "";
+      renderList();
+    }
+    scrollToCategory(tab.dataset.cat);
   });
+
+  document.getElementById("menu-list").addEventListener("scroll", updateActiveTabFromScroll, { passive: true });
+}
+
+function scrollToCategory(cat) {
+  document.getElementById(`section-${categorySlug(cat)}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Scroll-spy manual: highlight tab kategori sesuai section yang lagi keliatan di atas.
+function updateActiveTabFromScroll() {
+  if (searchQuery.trim()) return;
+  const list = document.getElementById("menu-list");
+  const sections = list.querySelectorAll(".menu-section");
+  let current = sections[0];
+  for (const sec of sections) {
+    if (sec.offsetTop - list.scrollTop <= 80) current = sec;
+  }
+  if (!current) return;
+  const cat = current.dataset.cat;
+  document.querySelectorAll(".cat-tab").forEach(t => t.classList.toggle("active", t.dataset.cat === cat));
 }
 
 function renderList() {
@@ -111,33 +138,19 @@ function renderList() {
       item.name.toLowerCase().includes(q)
     );
     list.innerHTML = results.length
-      ? results.map(menuCardHtml).join("")
+      ? `<div class="section-grid">${results.map(menuCardHtml).join("")}</div>`
       : `<p class='empty-hint'>Tidak ada hasil untuk "${searchQuery}"</p>`;
     return;
   }
 
-  if (currentCategory) {
-    list.innerHTML = (menu[currentCategory] || []).map(menuCardHtml).join("");
-    return;
-  }
-
-  list.innerHTML = Object.keys(menu).map(cat => {
-    const slug = categorySlug(cat);
-    const fallbackEmoji = menu[cat][0]?.emoji || "🍽️";
-    return `
-      <button class="category-card" data-cat="${cat}">
-        <div class="category-visual">
-          <img src="cat/${slug}.jpg" alt="${cat}" loading="lazy"
-               onload="this.nextElementSibling.style.display='none'"
-               onerror="this.style.display='none'" />
-          <div class="category-fallback">${fallbackEmoji}</div>
-        </div>
-        <div class="category-meta">
-          <div class="category-name">${cat}</div>
-          <div class="category-count">${menu[cat].length} menu</div>
-        </div>
-      </button>`;
-  }).join("");
+  list.innerHTML = Object.keys(menu).map(cat => `
+    <div class="menu-section" id="section-${categorySlug(cat)}" data-cat="${cat}">
+      <h3 class="section-title">${cat}</h3>
+      <div class="section-grid">
+        ${menu[cat].map(menuCardHtml).join("")}
+      </div>
+    </div>`
+  ).join("");
 }
 
 function renderMenu() {
@@ -155,13 +168,6 @@ function renderMenu() {
 const menuList = document.getElementById("menu-list");
 
 menuList.addEventListener("click", e => {
-  const card = e.target.closest(".category-card");
-  if (card) {
-    currentCategory = card.dataset.cat;
-    searchQuery = "";
-    renderMenu();
-    return;
-  }
   const plus = e.target.closest(".qty-btn.plus");
   const minus = e.target.closest(".qty-btn.minus");
   if (!plus && !minus) return;

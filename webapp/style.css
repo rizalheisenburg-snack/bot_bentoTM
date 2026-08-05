@@ -142,93 +142,57 @@ html, body {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(46,124,246,.18);
 }
-.btn-cats-back {
+/* ── Tab kategori (sticky, scroll horizontal) ─────────────────── */
+.cat-tabs-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 16px 12px;
+  scrollbar-width: none;
+}
+.cat-tabs-row::-webkit-scrollbar { display: none; }
+.cat-tab {
   flex-shrink: 0;
-  height: 44px;
-  padding: 0 14px;
-  border-radius: 14px;
-  border: none;
-  background: var(--grad);
-  color: #fff;
-  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 12px;
+  font-size: 12.5px;
   font-weight: 700;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--hint);
   cursor: pointer;
   white-space: nowrap;
+  transition: all .15s;
+}
+.cat-tab.active {
+  background: var(--grad);
+  border-color: transparent;
+  color: #fff;
   box-shadow: var(--glow);
 }
-.btn-cats-back:active { opacity: .8; }
 
-/* ── Menu grid ────────────────────────────────────────────────── */
+/* ── Menu list (flat scroll, dikelompokkan per section) ───────── */
 .menu-list {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   padding: 14px 16px 110px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
-  align-content: start;
-}
-
-/* Kartu kategori — gaya Opsi D */
-.category-card {
-  background: linear-gradient(160deg, var(--card2), var(--card));
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px;
-  font-family: inherit;
-  text-align: left;
-  box-shadow: var(--shadow);
-  transition: transform .12s ease, opacity .12s ease;
+  gap: 22px;
 }
-.category-card:active {
-  transform: scale(.97);
-  opacity: .85;
-}
-.category-visual {
-  position: relative;
-  height: 100px;
-  border-radius: 15px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, .05);
-  border: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.category-visual img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.category-fallback {
-  font-size: 46px;
-  line-height: 1;
-  filter: drop-shadow(0 6px 14px rgba(0,0,0,.4));
-}
-.category-meta { padding: 0 4px 4px; }
-.category-name {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.25;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.category-count {
-  font-size: 10.5px;
-  font-weight: 700;
+.section-title {
+  font-size: 13px;
+  font-weight: 800;
   color: var(--hint);
   text-transform: uppercase;
   letter-spacing: .06em;
-  margin-top: 3px;
+  margin-bottom: 10px;
+}
+.section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
 }
 
 /* Kartu item menu — gaya Opsi D */
@@ -366,7 +330,7 @@ html, body {
   text-align: center; color: var(--hint);
   padding: 48px 0; font-size: 15px;
 }
-.empty-hint { color: var(--hint); padding: 32px; text-align: center; grid-column: 1 / -1; }
+.empty-hint { color: var(--hint); padding: 32px; text-align: center; }
 
 /* ── Cart footer ──────────────────────────────────────────────── */
 .cart-footer {
