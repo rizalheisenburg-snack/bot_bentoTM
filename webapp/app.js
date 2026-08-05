@@ -53,9 +53,16 @@ const usd = n => `≈ $${(n / 4000).toFixed(2)}`;
 
 function menuCardHtml(item) {
   const qty = cart[item.id]?.qty || 0;
+  const emoji = item.emoji || "🍽️";
+  const visual = item.image_url
+    ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy"
+           onload="this.nextElementSibling.style.display='none'"
+           onerror="this.style.display='none'" />
+       <div class="menu-visual-fallback">${emoji}</div>`
+    : emoji;
   return `
     <div class="menu-card">
-      <div class="menu-visual">${item.emoji || "🍽️"}</div>
+      <div class="menu-visual">${visual}</div>
       <div class="menu-info">
         <div class="menu-cat">${item.category || ""}</div>
         <div class="menu-name">${item.name}</div>
