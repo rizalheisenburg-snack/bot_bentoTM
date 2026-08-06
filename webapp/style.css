@@ -70,6 +70,13 @@ html, body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Menu header (topbar + banner + kategori, nempel sticky bareng) ── */
+.menu-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
 /* ── Topbar ───────────────────────────────────────────────────── */
 .topbar {
   display: flex;
@@ -80,7 +87,6 @@ html, body {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line);
-  position: sticky; top: 0; z-index: 10;
 }
 .topbar-title { font-weight: 800; font-size: 17px; letter-spacing: -.01em; }
 .icon-btn {
@@ -104,7 +110,10 @@ html, body {
 .category-tabs {
   display: block;
   padding: 0;
-  background: transparent;
+  background: rgba(20, 22, 29, .82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line);
 }
 .menu-controls {
   display: flex;
