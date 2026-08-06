@@ -17,3 +17,15 @@ def get_min_order(lat: float, lon: float, cafe_lat: float, cafe_lon: float) -> i
     """Ambang minimal order (riel) berdasar jarak dari cafe. Tiered, bukan blocking."""
     distance_km = haversine(lat, lon, cafe_lat, cafe_lon)
     return 20000 if distance_km < 5 else 40000
+
+
+# Minimal order ditentukan dari alamat yang dipilih customer di cart (bukan GPS
+# share lagi) — KD jauh banget dari cafe, alamat lain dianggap tier dekat.
+ADDRESS_MIN_ORDER: dict[str, int] = {
+    "KD": 40_000,
+}
+DEFAULT_ADDRESS_MIN_ORDER = 20_000
+
+
+def get_min_order_by_address(address: str) -> int:
+    return ADDRESS_MIN_ORDER.get(address, DEFAULT_ADDRESS_MIN_ORDER)

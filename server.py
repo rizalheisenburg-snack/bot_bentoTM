@@ -10,7 +10,8 @@ from aiohttp import web
 
 from checkout_flow import checkout, verify_init_data
 from config import OWNER_ID
-from db import get_conn, get_setting, get_user_min_order
+from db import get_conn, get_setting
+from geo import ADDRESS_MIN_ORDER, DEFAULT_ADDRESS_MIN_ORDER
 from state_machine import (
     change_payment_method,
     force_cancel_order,
@@ -57,17 +58,9 @@ async def api_menu(request):
 
 # ── Minimal Order ─────────────────────────────────────────────────────────────
 
-@routes.get("/api/min-order")
-async def api_min_order(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
-    row = get_user_min_order(user["id"])
-    return _json({
-        "ok": True,
-        "min_order": row["min_order"] if row else 0,
-        "distance_km": row["distance_km"] if row else None,
-    })
+@routes.get("/api/address-tiers")
+async def api_address_tiers(request):
+    return _json({"tiers": ADDRESS_MIN_ORDER, "default": DEFAULT_ADDRESS_MIN_ORDER})
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
@@ -90,6 +83,7 @@ async def api_checkout(request):
             items=body.get("items", []),
             note=note,
             payment_method=body.get("payment_method", "CASH"),
+            address=body.get("address", ""),
         )
         # Kirim notif ke owner kalau order masuk
         if result.get("ok"):

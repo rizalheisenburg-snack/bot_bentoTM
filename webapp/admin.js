@@ -25,9 +25,13 @@ async function api(path, opts = {}) {
 }
 
 const riel = n => `${Number(n).toLocaleString("km-KH")}៛`;
+const escapeHtml = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const TERMINAL_STATUSES = new Set(["Selesai", "Dibatalkan"]);
 
 function itemSummary(items) {
-  return (items || []).map(i => `${i.qty}x ${i.item_name}`).join(", ");
+  return (items || [])
+    .map(i => `${escapeHtml(i.item_name)} × ${i.qty} — ${riel(i.unit_price * i.qty)}`)
+    .join("<br>");
 }
 
 function minutesSince(isoLikeUtc) {
@@ -74,11 +78,11 @@ function renderBoard() {
 
 function cardHtml(o) {
   const mins = minutesSince(o.status_changed_at);
-  const stale = mins > 15;
+  const stale = !TERMINAL_STATUSES.has(o.status) && mins > 15;
   const payChip = o.payment_status === "PAID"
     ? `<span class="pay-chip paid">Lunas</span>`
     : `<span class="pay-chip unpaid">Belum Bayar</span>`;
-  const name = o.full_name || o.username || o.user_id;
+  const name = escapeHtml(o.full_name || o.username || o.user_id);
   return `
     <div class="card ${stale ? "stale" : ""}" data-id="${o.id}">
       <div class="card-top">
@@ -130,10 +134,10 @@ function renderDetail() {
 
   const itemsHtml = (o.items || []).map(i => `
     <div class="detail-item-row">
-      <span>${i.item_name} × ${i.qty}</span>
+      <span>${escapeHtml(i.item_name)} × ${i.qty}</span>
       <span>${riel(i.unit_price * i.qty)}</span>
     </div>
-    ${i.item_note ? `<div class="detail-item-note">📝 ${i.item_note}</div>` : ""}
+    ${i.item_note ? `<div class="detail-item-note">📝 ${escapeHtml(i.item_note)}</div>` : ""}
   `).join("");
 
   const payHtml = o.payment_status === "PAID"
@@ -142,7 +146,7 @@ function renderDetail() {
 
   const methodLabel = o.payment_method === "ABA" ? "🏦 ABA" : "💵 CASH";
   const reasonHtml = o.status === "Dibatalkan" && o.cancel_reason
-    ? `<div class="detail-row"><span>Alasan Cancel</span><span>${o.cancel_reason}</span></div>` : "";
+    ? `<div class="detail-row"><span>Alasan Cancel</span><span>${escapeHtml(o.cancel_reason)}</span></div>` : "";
 
   const nextStatus = NEXT_STATUS[o.status];
   const actionButtons = [];
@@ -157,11 +161,11 @@ function renderDetail() {
   }
 
   document.getElementById("detail-body").innerHTML = `
-    <div class="detail-row"><span>Customer</span><span>${o.full_name || o.username || o.user_id}</span></div>
+    <div class="detail-row"><span>Customer</span><span>${escapeHtml(o.full_name || o.username || o.user_id)}</span></div>
     <div class="detail-row"><span>Metode Bayar</span><span>${methodLabel}</span></div>
     ${payHtml}
     ${reasonHtml}
-    ${o.note ? `<div class="detail-note">📝 ${o.note}</div>` : ""}
+    ${o.note ? `<div class="detail-note">📝 ${escapeHtml(o.note)}</div>` : ""}
     <div class="detail-items">${itemsHtml}</div>
     <div class="detail-row detail-total"><span>Total</span><span>${riel(o.total)}</span></div>
     <div class="action-row">${actionButtons.join("")}</div>

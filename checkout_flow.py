@@ -8,6 +8,7 @@ import urllib.parse
 
 from config import BOT_TOKEN
 from db import get_conn
+from geo import get_min_order_by_address
 from state_machine import auto_pay_if_free
 
 MAX_AGE = 86_400  # 24 jam anti-replay
@@ -40,10 +41,12 @@ def checkout(
     items: list[dict],
     note: str,
     payment_method: str = "CASH",
+    address: str = "",
 ) -> dict:
     """
     items: [{"item_id": int, "qty": int, "note": str (optional, verbatim, tidak diparsing)}, ...]
     Item yang habis/tidak ada otomatis dibuang dari order, sisanya tetap lanjut.
+    address: alamat tujuan yang dipilih customer di cart, nentuin tier minimal order.
 
     Return:
       {"ok": True, "order_id": int, "total": int, "unavailable_items": list}
@@ -79,6 +82,13 @@ def checkout(
 
     if not valid_items:
         return {"ok": False, "error": "Semua item tidak tersedia"}
+
+    min_order = get_min_order_by_address(address) if address else 0
+    if subtotal > 0 and subtotal < min_order:
+        return {
+            "ok": False,
+            "error": f"Order minimal {min_order:,}៛ untuk tujuan '{address}' — kurang {min_order - subtotal:,}៛ lagi.",
+        }
 
     # Voucher support is disabled; only Cash and ABA are accepted.
     if payment_method == "VOUCHER":

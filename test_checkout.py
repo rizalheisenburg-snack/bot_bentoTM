@@ -97,6 +97,56 @@ def test_checkout_rejects_voucher_payment_method(fake_user, seeded_menu):
     assert not result["ok"]
     assert "Cash atau ABA" in result["error"]
 
+def test_checkout_rejects_below_min_order_for_kd_tier(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 2, "qty": 2}],  # 2x 15000 = 30000, di bawah tier KD (40000)
+        note="test",
+        payment_method="CASH",
+        address="KD",
+    )
+    assert not result["ok"]
+    assert "40.000" in result["error"] or "40,000" in result["error"]
+
+def test_checkout_accepts_at_min_order_for_kd_tier(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 2, "qty": 3}],  # 3x 15000 = 45000, di atas tier KD (40000)
+        note="test",
+        payment_method="CASH",
+        address="KD",
+    )
+    assert result["ok"]
+
+def test_checkout_rejects_below_default_tier_for_other_address(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],  # 5000, di bawah default tier (20000)
+        note="test",
+        payment_method="CASH",
+        address="Hp Tower",
+    )
+    assert not result["ok"]
+
+def test_checkout_accepts_at_default_tier_for_other_address(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 2, "qty": 2}],  # 30000, di atas default tier (20000)
+        note="test",
+        payment_method="CASH",
+        address="WON",
+    )
+    assert result["ok"]
+
+def test_checkout_skips_min_order_check_when_address_blank(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],  # 5000, gak ada address dikirim
+        note="test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+
 def test_checkout_drops_unavailable_items_and_still_accepts_order(fake_user, seeded_menu):
     with get_conn() as conn:
         conn.execute("UPDATE menu_items SET available=0 WHERE id=2")

@@ -10,7 +10,8 @@ const INIT_DATA = tg?.initData || "";
 /* ── State ────────────────────────────────────────────────────── */
 const cart = {};       // { item_id: { item, qty, note } }
 let menu = {};         // { category: [item, ...] }
-let minOrder = 0;      // ambang minimal order (riel) berdasar tier jarak customer, 0 = tanpa restriksi
+let addressTiers = { tiers: {}, default: 0 };  // minimal order per alamat, dari /api/address-tiers
+let minOrder = 0;      // ambang minimal order (riel) buat alamat yang lagi dipilih
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 async function api(path, opts = {}) {
@@ -284,6 +285,11 @@ function _updateAddrBtn(label) {
   document.getElementById("btn-addr-pick").textContent = label + " ▾";
 }
 
+function _updateMinOrder() {
+  minOrder = addressTiers.tiers[selectedAddr] ?? addressTiers.default;
+  updatePriceSummary();
+}
+
 function _closePicker() {
   document.getElementById("addr-picker").classList.add("hidden");
 }
@@ -299,6 +305,7 @@ document.querySelectorAll(".addr-chip").forEach(chip => {
     selectedAddr = chip.dataset.addr;
     document.getElementById("addr-custom").value = "";
     _updateAddrBtn(selectedAddr);
+    _updateMinOrder();
     _closePicker();
   });
 });
@@ -314,6 +321,7 @@ document.getElementById("addr-custom").addEventListener("input", e => {
     selectedAddr = first.dataset.addr;
     _updateAddrBtn(selectedAddr);
   }
+  _updateMinOrder();
 });
 
 /* ── Checkout ─────────────────────────────────────────────────── */
@@ -328,7 +336,7 @@ async function doCheckout(payMethod, onSuccess = showSuccess) {
 
   const result = await api("/api/checkout", {
     method: "POST",
-    body: JSON.stringify({ items, note, payment_method: payMethod }),
+    body: JSON.stringify({ items, note, payment_method: payMethod, address: addr }),
   });
 
   if (result.ok) {
@@ -368,6 +376,7 @@ function clearCart() {
     firstChip.classList.add("active");
     selectedAddr = firstChip.dataset.addr;
     _updateAddrBtn(selectedAddr);
+    _updateMinOrder();
     _closePicker();
   }
   updateCartFab();
@@ -575,9 +584,10 @@ document.querySelectorAll(".back-btn[data-target]").forEach(btn => {
 (async () => {
   show("loading");
   try {
-    const [menuData, minOrderData] = await Promise.all([api("/api/menu"), api("/api/min-order")]);
+    const [menuData, tiersData] = await Promise.all([api("/api/menu"), api("/api/address-tiers")]);
     menu = menuData.categories || {};
-    minOrder = minOrderData.ok ? (minOrderData.min_order || 0) : 0;
+    addressTiers = { tiers: tiersData.tiers || {}, default: tiersData.default || 0 };
+    _updateMinOrder();
     document.getElementById("closed-banner")?.classList.toggle("hidden", menuData.open !== false);
     show("screen-menu");
     renderMenu();

@@ -60,7 +60,7 @@ PAYMENT_METHOD_LABEL: dict[str, str] = {
 
 # Pesan notif ke customer per status (dipakai pas owner pencet tombol)
 CUSTOMER_STATUS_MSG: dict[str, str] = {
-    "Diproses":   "👨‍🍳 *Order #{id} diterima & mulai dimasak!*\nSebentar lagi jadi!",
+    "Diproses":   "👨‍🍳 *Order #{id} diterima & mulai dimasak!*\nEstimasi ±10-25 menit tergantung antrian dapur ya 🙏",
     "Siap":       "🎉 *Order #{id} selesai!*\nPesananmu siap / lagi diantar ke tujuan.",
     "Dibatalkan": "🚫 *Order #{id} dibatalkan.*",
 }
@@ -389,7 +389,7 @@ async def handle_location(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     set_user_min_order(update.effective_user.id, min_order, distance_km)
     await update.message.reply_text(
         f"📍 Lokasi diterima! Jarak kamu ~{distance_km:.1f} km dari cafe.\n\n"
-        f"🛒 Minimal order kamu: Rp {min_order:,}",
+        f"Minimal order ditentuin dari alamat yang kamu pilih di keranjang ya 🛒",
         reply_markup=ReplyKeyboardRemove(),
     )
 
