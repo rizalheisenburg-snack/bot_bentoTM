@@ -53,7 +53,7 @@ async function boot() {
 
 /* ── Render board ─────────────────────────────────────────────── */
 function renderBoard() {
-  const byStatus = { Diterima: [], Diproses: [], Siap: [], Dibatalkan: [] };
+  const byStatus = { Diterima: [], Diproses: [], Siap: [], Selesai: [], Dibatalkan: [] };
   for (const o of Object.values(orders)) {
     if (byStatus[o.status]) byStatus[o.status].push(o);
   }
