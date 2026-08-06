@@ -42,7 +42,8 @@ html, body {
 .screen {
   display: none;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
 }
 .screen.active { display: flex; }
 
@@ -555,7 +556,7 @@ html, body {
 }
 
 /* ── Order detail ─────────────────────────────────────────────── */
-.order-detail-body { padding: 16px; }
+.order-detail-body { flex: 1; overflow-y: auto; padding: 16px; }
 .detail-status-big {
   text-align: center; font-size: 18px; font-weight: 800;
   padding: 18px;
