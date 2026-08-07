@@ -71,17 +71,8 @@ function renderBoard() {
       : `<div class="column-empty">Belum ada order</div>`;
   }
 
-  document.querySelectorAll(".card").forEach(el => {
-    el.addEventListener("click", () => openDetail(parseInt(el.dataset.id)));
-  });
-
-  document.querySelectorAll(".btn-chat").forEach(btn => {
-    btn.addEventListener("click", e => {
-      e.stopPropagation(); // jangan trigger openDetail parent card
-      const link = btn.dataset.link;
-      if (link) window.open(link, "_blank");
-    });
-  });
+  // Klik di-handle via event delegation (#board), lihat listener di bawah —
+  // ga perlu attach per-card/per-tombol di sini lagi.
 }
 
 function chatLinkFor(o) {
@@ -100,7 +91,7 @@ function cardHtml(o) {
   const chatLink = chatLinkFor(o);
   const chatBtn = chatLink
     ? `<button class="icon-btn-sm btn-chat" data-link="${escapeHtml(chatLink)}" title="Chat pelanggan">💬</button>`
-    : `<button class="icon-btn-sm" disabled title="Chat tidak tersedia">💬</button>`;
+    : `<button class="icon-btn-sm btn-chat" disabled title="Chat tidak tersedia">💬</button>`;
   return `
     <div class="card ${stale ? "stale" : ""}" data-id="${o.id}">
       <div class="card-top">
@@ -112,6 +103,20 @@ function cardHtml(o) {
       ${stale ? `<span class="card-timer">⏱ ${mins} menit</span>` : ""}
     </div>`;
 }
+
+/* ── Klik kanban: event delegation (1 listener permanen, board tidak
+   pernah di-replace innerHTML-nya — cuma isi kolom di dalamnya) ─────── */
+document.getElementById("board").addEventListener("click", e => {
+  const chatBtn = e.target.closest(".btn-chat");
+  if (chatBtn) {
+    if (!chatBtn.disabled && chatBtn.dataset.link) {
+      window.open(chatBtn.dataset.link, "_blank");
+    }
+    return; // baik enabled maupun disabled, jangan lanjut ke openDetail
+  }
+  const card = e.target.closest(".card");
+  if (card) openDetail(parseInt(card.dataset.id));
+});
 
 /* ── Tab status: quick-jump + scroll-spy ───────────────────────── */
 document.getElementById("status-tabs").addEventListener("click", e => {
