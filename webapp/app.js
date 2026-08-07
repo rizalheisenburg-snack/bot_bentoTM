@@ -345,6 +345,15 @@ async function doCheckout(payMethod, onSuccess = showSuccess) {
       const names = result.unavailable_items.map(i => i.item_name || `#${i.item_id}`).join(", ");
       tg?.showAlert?.(`Item berikut habis dan tidak dimasukkan ke order: ${names}`);
     }
+    if (result.mirror_sent === false) {
+      const msg = result.bot_deeplink
+        ? "Order kamu tetap berhasil ✅, tapi kami tidak bisa mengirim detail order ke chat kamu. Silakan buka chat bot ini dulu dan tekan Start, lalu order kamu akan otomatis dikirim ke chat berikutnya."
+        : "Order kamu tetap berhasil ✅, tapi kami tidak bisa mengirim detail order ke chat kamu. Silakan buka chat bot ini dan tekan Start.";
+      tg?.showAlert?.(msg);
+      if (result.bot_deeplink) {
+        tg?.openTelegramLink?.(result.bot_deeplink);
+      }
+    }
     onSuccess(result);
   } else {
     tg?.showAlert?.(result.error || "Checkout gagal, coba lagi.");

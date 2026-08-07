@@ -7,9 +7,10 @@ import pathlib
 log = logging.getLogger(__name__)
 
 from aiohttp import web
+from telegram.error import Forbidden
 
 from checkout_flow import checkout, verify_init_data
-from config import OWNER_ID
+from config import BOT_USERNAME, OWNER_ID
 from db import get_conn, get_setting
 from geo import ADDRESS_MIN_ORDER, DEFAULT_ADDRESS_MIN_ORDER
 from state_machine import (
@@ -91,7 +92,10 @@ async def api_checkout(request):
             await broadcast_order_update(result.get("order_id"))
         # Kirim mirror ke pelanggan untuk semua order sukses yang bukan auto-paid
         if result.get("ok") and not result.get("auto_paid"):
-            await _send_order_mirror_to_user(request, result.get("order_id"))
+            mirror_sent = await _send_order_mirror_to_user(request, result.get("order_id"))
+            result["mirror_sent"] = mirror_sent
+            if not mirror_sent and BOT_USERNAME:
+                result["bot_deeplink"] = f"https://t.me/{BOT_USERNAME}"
         return _json(result, 200 if result["ok"] else 400)
     except Exception as e:
         log.exception("checkout error")
@@ -121,12 +125,14 @@ async def _notify_owner_new_order(request: web.Request, order_id: int | None):
         log.exception("gagal kirim notif owner")
 
 
-async def _send_order_mirror_to_user(request: web.Request, order_id: int | None):
+async def _send_order_mirror_to_user(request: web.Request, order_id: int | None) -> bool:
+    """Return True kalau mirror berhasil terkirim, False kalau gagal (termasuk
+    kasus user belum pernah /start bot, di mana Telegram me-reject dengan 403)."""
     if not order_id:
-        return
+        return False
     bot = request.app["bot"]
     if not bot:
-        return
+        return False
     try:
         from owner_console import _order_text
         from state_machine import get_order
@@ -134,7 +140,7 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
 
         o = get_order(order_id)
         if not o:
-            return
+            return False
 
         async def _send_photo(path):
             if not path:
@@ -154,7 +160,7 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
                 text="\n\n".join(lines),
                 parse_mode="Markdown",
             )
-            return
+            return True
 
         lines = [
             _order_text(o, for_admin=False),
@@ -174,8 +180,18 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
 
         if o.get("payment_method") == "ABA":
             await _send_photo(ABA_QR_IMAGE_PATH)
+        return True
+    except Forbidden:
+        # User belum pernah chat/start bot ini — Telegram menolak sendMessage.
+        # Ini kondisi yang diekspektasikan (bukan bug), jadi cukup di-warn.
+        log.warning(
+            "gagal kirim mirror order #%s: user %s belum pernah start bot",
+            order_id, o["user_id"],
+        )
+        return False
     except Exception:
         log.exception("gagal kirim mirror order ke user")
+        return False
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────
