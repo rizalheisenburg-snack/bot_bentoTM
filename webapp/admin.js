@@ -74,6 +74,20 @@ function renderBoard() {
   document.querySelectorAll(".card").forEach(el => {
     el.addEventListener("click", () => openDetail(parseInt(el.dataset.id)));
   });
+
+  document.querySelectorAll(".btn-chat").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation(); // jangan trigger openDetail parent card
+      const link = btn.dataset.link;
+      if (link) window.open(link, "_blank");
+    });
+  });
+}
+
+function chatLinkFor(o) {
+  if (o.user_id) return `tg://user?id=${o.user_id}`;
+  if (o.username) return `https://t.me/${o.username}`;
+  return null;
 }
 
 function cardHtml(o) {
@@ -83,10 +97,15 @@ function cardHtml(o) {
     ? `<span class="pay-chip paid">Lunas</span>`
     : `<span class="pay-chip unpaid">Belum Bayar</span>`;
   const name = escapeHtml(o.full_name || o.username || o.user_id);
+  const chatLink = chatLinkFor(o);
+  const chatBtn = chatLink
+    ? `<button class="icon-btn-sm btn-chat" data-link="${escapeHtml(chatLink)}" title="Chat pelanggan">💬</button>`
+    : `<button class="icon-btn-sm" disabled title="Chat tidak tersedia">💬</button>`;
   return `
     <div class="card ${stale ? "stale" : ""}" data-id="${o.id}">
       <div class="card-top">
         <span class="card-name">#${o.id} ${name}</span>
+        ${chatBtn}
         ${payChip}
       </div>
       <div class="card-summary">${itemSummary(o.items)}</div>
