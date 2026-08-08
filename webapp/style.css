@@ -362,6 +362,11 @@ html, body {
   -webkit-backdrop-filter: blur(18px);
   padding: 16px;
   border-top: 1px solid var(--line);
+  /* Kalau keyboard muncul (100dvh di .screen ikut mengecil), footer ini
+     butuh bisa nyusut & scroll sendiri — tanpa overflow-y ini, flexbox
+     gak ngasih dia ruang buat mengecil, jadi Tujuan/Note/Total kepepet
+     numpuk keliatan sempit dan tombol bawah bisa ke-clip gak keliatan. */
+  overflow-y: auto;
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
