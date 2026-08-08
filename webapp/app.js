@@ -393,10 +393,17 @@ function renderCart() {
       const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
       const unitPrice = item.price + delta;
       const modsText = (modifiers || []).map(m => m.option_name).join(", ");
+      const emoji = item.emoji || "☕";
+      const visual = item.image_url
+        ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy"
+               onload="this.nextElementSibling.style.display='none'"
+               onerror="this.style.display='none'" />
+           <span class="cart-emoji-fallback">${emoji}</span>`
+        : emoji;
       return `
       <div class="cart-item">
         <div class="cart-item-row">
-          <span class="cart-emoji">${item.emoji || "☕"}</span>
+          <span class="cart-emoji">${visual}</span>
           <div class="cart-item-info">
             <div class="cart-item-name">${item.name}</div>
             ${modsText ? `<div class="cart-item-mods">${escapeHtml(modsText)}</div>` : ""}
