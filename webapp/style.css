@@ -315,8 +315,14 @@ html, body {
 .cart-total-fab { font-size: 14.5px; font-weight: 800; color: var(--blue2); }
 
 /* ── Cart list ────────────────────────────────────────────────── */
-.cart-list {
+/* Satu scroll container buat seluruh isi keranjang (item, tambah menu, alamat,
+   delivery, note, harga, tombol bayar) — biar di layar sempit/keyboard kebuka,
+   tinggal scroll sekali aja ngeliat semuanya, bukan 2 area scroll terpisah. */
+.cart-scroll {
   flex: 1; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.cart-list {
   padding: 12px 16px;
 }
 .cart-item {
@@ -371,11 +377,6 @@ html, body {
   -webkit-backdrop-filter: blur(18px);
   padding: 16px;
   border-top: 1px solid var(--line);
-  /* Kalau keyboard muncul (100dvh di .screen ikut mengecil), footer ini
-     butuh bisa nyusut & scroll sendiri — tanpa overflow-y ini, flexbox
-     gak ngasih dia ruang buat mengecil, jadi Tujuan/Note/Total kepepet
-     numpuk keliatan sempit dan tombol bawah bisa ke-clip gak keliatan. */
-  overflow-y: auto;
   padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 

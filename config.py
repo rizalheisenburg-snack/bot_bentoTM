@@ -14,9 +14,10 @@ PORT: int = int(os.getenv("PORT", "8080"))
 PRINTER_AGENT_TOKEN: str = os.getenv("PRINTER_AGENT_TOKEN", "")
 
 # ⚠️ PLACEHOLDER — WAJIB diganti owner sebelum fitur Express dipakai beneran.
-# Ini cuma estimasi yang ditampilkan di checkout (TIDAK ditagih di app — ongkir
-# Express dibayar CASH langsung ke kurir saat barang sampai).
-EXPRESS_DELIVERY_FEE_ESTIMATE: int = int(os.getenv("EXPRESS_DELIVERY_FEE_ESTIMATE", "0"))
+# Teks bebas (bukan angka) supaya bisa isi rentang harga per-jarak (mis. "4.000-20.000")
+# tanpa perlu ubah kode. Ini cuma estimasi yang ditampilkan di checkout (TIDAK ditagih
+# di app — ongkir Express dibayar CASH langsung ke kurir saat barang sampai).
+EXPRESS_DELIVERY_FEE_ESTIMATE: str = os.getenv("EXPRESS_DELIVERY_FEE_ESTIMATE", "Hubungi admin")
 EXPRESS_LOCATION_REMINDER_MINUTES: int = int(os.getenv("EXPRESS_LOCATION_REMINDER_MINUTES", "15"))
 EXPRESS_REMINDER_CHECK_INTERVAL_SECONDS: int = int(os.getenv("EXPRESS_REMINDER_CHECK_INTERVAL_SECONDS", "60"))
 

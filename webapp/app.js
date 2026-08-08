@@ -774,7 +774,7 @@ document.querySelectorAll(".back-btn[data-target]").forEach(btn => {
   try {
     const [menuData, tiersData] = await Promise.all([api("/api/menu"), api("/api/address-tiers")]);
     menu = menuData.categories || {};
-    document.getElementById("express-fee-amount").textContent = riel(menuData.express_fee_estimate || 0);
+    document.getElementById("express-fee-amount").textContent = menuData.express_fee_estimate || "-";
     addressTiers = { tiers: tiersData.tiers || {}, default: tiersData.default || 0 };
     _updateMinOrder();
     document.getElementById("closed-banner")?.classList.toggle("hidden", menuData.open !== false);
