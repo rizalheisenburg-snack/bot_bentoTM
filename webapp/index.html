@@ -6,7 +6,7 @@
   <title>Warteg JAGO MASAK</title>
   <link rel="icon" href="img/jagomasak.jpg" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=15" />
+  <link rel="stylesheet" href="style.css?v=16" />
 </head>
 <body>
 
@@ -43,6 +43,9 @@
     <span class="topbar-title">Keranjang</span>
   </div>
   <div id="cart-items" class="cart-list"></div>
+  <div class="cart-add-more">
+    <button class="btn-secondary back-btn" data-target="screen-menu">+ Tambah Menu Lagi</button>
+  </div>
   <div class="cart-footer">
 
     <div class="address-section">
@@ -71,8 +74,6 @@
       <div class="price-row total-row"><span>Total</span><span id="sum-total">0៛</span></div>
       <div id="min-order-warning" class="min-order-warning hidden"></div>
     </div>
-
-    <button class="btn-secondary back-btn" data-target="screen-menu">+ Tambah Menu Lagi</button>
 
     <div class="pay-method-row">
       <button id="btn-pay-cash" class="btn-pay-method">💵 Cash</button>

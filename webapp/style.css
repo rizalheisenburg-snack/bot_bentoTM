@@ -355,6 +355,14 @@ html, body {
 }
 .empty-hint { color: var(--hint); padding: 32px; text-align: center; }
 
+/* ── Tambah menu (di antara list item & kotak checkout) ─────────── */
+.cart-add-more {
+  padding: 0 16px 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.cart-add-more .btn-secondary { margin-top: 0; }
+
 /* ── Cart footer ──────────────────────────────────────────────── */
 .cart-footer {
   background: rgba(29, 33, 44, .92);
