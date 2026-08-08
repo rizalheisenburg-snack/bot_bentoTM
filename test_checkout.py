@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from importlib import reload
 from types import SimpleNamespace
@@ -21,9 +22,14 @@ from state_machine import (
     force_cancel_order,
     get_active_orders,
     get_cancel_warning,
+    get_express_orders_awaiting_location_reminder,
     get_order,
+    get_pending_express_location_order,
+    mark_express_reminder_sent,
     mark_paid,
+    save_express_location,
     set_admin_msg_id,
+    set_express_location_requested,
     transition,
 )
 
@@ -62,6 +68,60 @@ def seeded_menu():
         )
         conn.commit()
     return True
+
+@pytest.fixture
+def modifier_product():
+    """Insert 1 produk komposit + 2 modifier group (masing-masing wajib pilih 1),
+    tiap grup 2 opsi. Return dict berisi id-id yang dibutuhkan test."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO menu_items (name, description, price, category, emoji) VALUES (?,?,?,?,?)",
+            ("Nasi Campur Test", "Desc", 10_000, "Menu Nasi", "🍱"),
+        )
+        product_id = cur.lastrowid
+
+        cur = conn.execute(
+            "INSERT INTO modifier_groups (product_id, name, min_select, max_select, is_required) VALUES (?,?,?,?,?)",
+            (product_id, "Nasi", 1, 1, 1),
+        )
+        nasi_group_id = cur.lastrowid
+        cur = conn.execute(
+            "INSERT INTO modifier_options (group_id, name, price_delta) VALUES (?,?,?)",
+            (nasi_group_id, "Nasi Putih", 0),
+        )
+        nasi_putih_id = cur.lastrowid
+        cur = conn.execute(
+            "INSERT INTO modifier_options (group_id, name, price_delta) VALUES (?,?,?)",
+            (nasi_group_id, "Nasi Merah", 4_000),
+        )
+        nasi_merah_id = cur.lastrowid
+
+        cur = conn.execute(
+            "INSERT INTO modifier_groups (product_id, name, min_select, max_select, is_required) VALUES (?,?,?,?,?)",
+            (product_id, "Sayur", 1, 1, 1),
+        )
+        sayur_group_id = cur.lastrowid
+        cur = conn.execute(
+            "INSERT INTO modifier_options (group_id, name, price_delta) VALUES (?,?,?)",
+            (sayur_group_id, "Capcay", 0),
+        )
+        capcay_id = cur.lastrowid
+        cur = conn.execute(
+            "INSERT INTO modifier_options (group_id, name, price_delta) VALUES (?,?,?)",
+            (sayur_group_id, "Jengkol", 5_000),
+        )
+        jengkol_id = cur.lastrowid
+        conn.commit()
+
+    return {
+        "product_id": product_id,
+        "nasi_group_id": nasi_group_id,
+        "nasi_putih_id": nasi_putih_id,
+        "nasi_merah_id": nasi_merah_id,
+        "sayur_group_id": sayur_group_id,
+        "capcay_id": capcay_id,
+        "jengkol_id": jengkol_id,
+    }
 
 def test_checkout_cash_assigns_payment_method(fake_user, seeded_menu):
     result = checkout(
@@ -838,3 +898,267 @@ async def test_ws_admin_broadcast_noop_without_clients():
     # Tidak ada client connected — broadcast harus no-op, tidak boleh raise.
     await server.broadcast_order_update(None)
     await server.broadcast_order_update(999999)
+
+
+# ── Modifier groups ──────────────────────────────────────────────────────────
+
+def test_checkout_rejects_missing_required_modifier_group(fake_user, modifier_product):
+    result = checkout(
+        user=fake_user,
+        items=[{
+            "item_id": modifier_product["product_id"], "qty": 1,
+            "modifiers": [
+                {"group_id": modifier_product["nasi_group_id"], "option_id": modifier_product["nasi_putih_id"]},
+                # Sayur belum dipilih sama sekali
+            ],
+        }],
+        note="test",
+        payment_method="CASH",
+    )
+    assert not result["ok"]
+    assert "Sayur" in result["error"]
+
+def test_checkout_rejects_when_no_modifiers_sent_at_all(fake_user, modifier_product):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": modifier_product["product_id"], "qty": 1}],
+        note="test",
+        payment_method="CASH",
+    )
+    assert not result["ok"]
+
+def test_checkout_rejects_option_not_belonging_to_its_group(fake_user, modifier_product):
+    result = checkout(
+        user=fake_user,
+        items=[{
+            "item_id": modifier_product["product_id"], "qty": 1,
+            "modifiers": [
+                # capcay_id milik grup Sayur, dikirim seolah-olah pilihan grup Nasi
+                {"group_id": modifier_product["nasi_group_id"], "option_id": modifier_product["capcay_id"]},
+                {"group_id": modifier_product["sayur_group_id"], "option_id": modifier_product["capcay_id"]},
+            ],
+        }],
+        note="test",
+        payment_method="CASH",
+    )
+    assert not result["ok"]
+
+def test_checkout_succeeds_with_all_required_modifiers_and_correct_price(fake_user, modifier_product):
+    result = checkout(
+        user=fake_user,
+        items=[{
+            "item_id": modifier_product["product_id"], "qty": 2,
+            "modifiers": [
+                {"group_id": modifier_product["nasi_group_id"], "option_id": modifier_product["nasi_merah_id"]},  # +4000
+                {"group_id": modifier_product["sayur_group_id"], "option_id": modifier_product["jengkol_id"]},   # +5000
+            ],
+        }],
+        note="test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    # base 10000 + 4000 + 5000 = 19000 per unit, qty 2 => 38000
+    assert result["subtotal"] == 38_000
+    order = get_order(result["order_id"])
+    item = order["items"][0]
+    assert item["unit_price"] == 19_000
+    mods = json.loads(item["modifiers_json"])
+    assert sorted(m["option_name"] for m in mods) == ["Jengkol", "Nasi Merah"]
+
+def test_checkout_zero_delta_combination_matches_base_price(fake_user, modifier_product):
+    result = checkout(
+        user=fake_user,
+        items=[{
+            "item_id": modifier_product["product_id"], "qty": 1,
+            "modifiers": [
+                {"group_id": modifier_product["nasi_group_id"], "option_id": modifier_product["nasi_putih_id"]},
+                {"group_id": modifier_product["sayur_group_id"], "option_id": modifier_product["capcay_id"]},
+            ],
+        }],
+        note="test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    assert result["subtotal"] == 10_000
+
+def test_checkout_duplicate_guard_ignores_orders_with_different_modifiers(fake_user, modifier_product):
+    common_kwargs = dict(user=fake_user, note="test", payment_method="CASH")
+    r1 = checkout(
+        items=[{
+            "item_id": modifier_product["product_id"], "qty": 1,
+            "modifiers": [
+                {"group_id": modifier_product["nasi_group_id"], "option_id": modifier_product["nasi_putih_id"]},
+                {"group_id": modifier_product["sayur_group_id"], "option_id": modifier_product["capcay_id"]},
+            ],
+        }],
+        **common_kwargs,
+    )
+    r2 = checkout(
+        items=[{
+            "item_id": modifier_product["product_id"], "qty": 1,
+            "modifiers": [
+                {"group_id": modifier_product["nasi_group_id"], "option_id": modifier_product["nasi_merah_id"]},
+                {"group_id": modifier_product["sayur_group_id"], "option_id": modifier_product["capcay_id"]},
+            ],
+        }],
+        **common_kwargs,
+    )
+    assert r1["ok"] and r2["ok"]
+    assert r1["order_id"] != r2["order_id"]
+    assert not r2.get("duplicate")
+
+def test_checkout_plain_item_without_modifier_groups_is_unaffected(fake_user, seeded_menu):
+    # Regresi: produk tanpa modifier_groups checkout normal, field "modifiers" gak perlu dikirim.
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],
+        note="test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+
+
+# ── Kurir Express ──────────────────────────────────────────────────────────────
+
+def test_checkout_defaults_to_internal_delivery(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="test", payment_method="CASH",
+    )
+    assert result["ok"]
+    assert result["delivery_type"] == "internal"
+    order = get_order(result["order_id"])
+    assert order["delivery_type"] == "internal"
+
+
+def test_checkout_express_with_cash_is_rejected(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="test", payment_method="CASH", delivery_type="express",
+    )
+    assert not result["ok"]
+    assert "ABA" in result["error"]
+
+
+def test_checkout_express_with_aba_succeeds_and_sets_delivery_type(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    assert result["ok"]
+    assert result["delivery_type"] == "express"
+    order = get_order(result["order_id"])
+    assert order["delivery_type"] == "express"
+
+
+def test_checkout_invalid_delivery_type_normalizes_to_internal(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="test", payment_method="CASH", delivery_type="rocket",
+    )
+    assert result["ok"]
+    assert result["delivery_type"] == "internal"
+
+
+def test_checkout_duplicate_detection_distinguishes_delivery_type(fake_user, seeded_menu):
+    first = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="internal",
+    )
+    second = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    assert first["ok"] and second["ok"]
+    assert second["order_id"] != first["order_id"]
+    assert not second.get("duplicate")
+
+
+def test_change_payment_method_rejects_cash_for_express_order(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    r = change_payment_method(result["order_id"], "CASH")
+    assert not r["ok"]
+    assert "Express" in r["error"]
+    order = get_order(result["order_id"])
+    assert order["payment_method"] == "ABA"
+
+
+def test_get_pending_express_location_order_returns_none_when_no_express_order(fake_user, seeded_menu):
+    checkout(
+        user=fake_user, items=[{"item_id": 1, "qty": 1}],
+        note="test", payment_method="CASH",
+    )
+    assert get_pending_express_location_order(fake_user["id"]) is None
+
+
+def test_get_pending_express_location_order_returns_order_awaiting_location(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    pending = get_pending_express_location_order(fake_user["id"])
+    assert pending is not None
+    assert pending["id"] == result["order_id"]
+
+
+def test_get_pending_express_location_order_none_after_location_saved(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    save_express_location(result["order_id"], 10.123, 103.456)
+    assert get_pending_express_location_order(fake_user["id"]) is None
+    order = get_order(result["order_id"])
+    assert order["customer_lat"] == pytest.approx(10.123)
+    assert order["customer_lng"] == pytest.approx(103.456)
+    assert order["location_received_at"] is not None
+
+
+def test_get_express_orders_awaiting_location_reminder_respects_threshold_and_one_time_flag(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    order_id = result["order_id"]
+
+    # Belum diminta lokasi sama sekali -> tidak muncul di reminder list.
+    assert get_express_orders_awaiting_location_reminder(15) == []
+
+    set_express_location_requested(order_id)
+    # Baru diminta barusan -> masih di bawah threshold, belum perlu reminder.
+    assert get_express_orders_awaiting_location_reminder(15) == []
+
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET location_requested_at = datetime('now', '-20 minutes') WHERE id=?",
+            (order_id,),
+        )
+        conn.commit()
+    due = get_express_orders_awaiting_location_reminder(15)
+    assert [o["id"] for o in due] == [order_id]
+
+    mark_express_reminder_sent(order_id)
+    # Sudah pernah di-reminder -> tidak muncul lagi walau masih lewat threshold.
+    assert get_express_orders_awaiting_location_reminder(15) == []
+
+
+def test_get_express_orders_awaiting_location_reminder_skips_after_location_received(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user, items=[{"item_id": 2, "qty": 1}],
+        note="test", payment_method="ABA", delivery_type="express",
+    )
+    order_id = result["order_id"]
+    set_express_location_requested(order_id)
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET location_requested_at = datetime('now', '-20 minutes') WHERE id=?",
+            (order_id,),
+        )
+        conn.commit()
+    save_express_location(order_id, 1.0, 2.0)
+    assert get_express_orders_awaiting_location_reminder(15) == []
+    order = get_order(result["order_id"])
+    assert order["items"][0]["modifiers_json"] is None

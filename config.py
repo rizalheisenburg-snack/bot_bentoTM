@@ -13,6 +13,13 @@ WEBAPP_URL: str = os.getenv("WEBAPP_URL", "http://localhost:8082")
 PORT: int = int(os.getenv("PORT", "8080"))
 PRINTER_AGENT_TOKEN: str = os.getenv("PRINTER_AGENT_TOKEN", "")
 
+# ⚠️ PLACEHOLDER — WAJIB diganti owner sebelum fitur Express dipakai beneran.
+# Ini cuma estimasi yang ditampilkan di checkout (TIDAK ditagih di app — ongkir
+# Express dibayar CASH langsung ke kurir saat barang sampai).
+EXPRESS_DELIVERY_FEE_ESTIMATE: int = int(os.getenv("EXPRESS_DELIVERY_FEE_ESTIMATE", "0"))
+EXPRESS_LOCATION_REMINDER_MINUTES: int = int(os.getenv("EXPRESS_LOCATION_REMINDER_MINUTES", "15"))
+EXPRESS_REMINDER_CHECK_INTERVAL_SECONDS: int = int(os.getenv("EXPRESS_REMINDER_CHECK_INTERVAL_SECONDS", "60"))
+
 from pathlib import Path
 BASE_DIR = Path(__file__).parent
 ABA_QR_IMAGE_PATH: str = str(BASE_DIR / "webapp" / "aba-mat-baru.jpg")

@@ -9,9 +9,19 @@ const cart = {};       // { item_id: { item, qty, note } }
 let menu = {};         // { category: [item, ...] }
 let addressTiers = { tiers: {}, default: 0 };  // minimal order per alamat, dari /api/address-tiers
 let minOrder = 0;      // ambang minimal order (riel) buat alamat yang lagi dipilih
+let selectedDeliveryType = "internal";  // 'internal' | 'express'
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 const escapeAttr = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+
+function modifierText(item) {
+  if (!item.modifiers_json) return "";
+  try {
+    return JSON.parse(item.modifiers_json).map(m => m.option_name).join(", ");
+  } catch {
+    return "";
+  }
+}
 
 function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -49,6 +59,13 @@ function menuCardHtml(item) {
            onerror="this.style.display='none'" />
        <div class="menu-visual-fallback">${emoji}</div>`
     : emoji;
+  const footControl = item.has_modifiers
+    ? `<button class="btn-choose" data-id="${item.id}">Pilih</button>`
+    : `<div class="qty-control ${qty ? "" : "empty"}" id="ctrl-${item.id}">
+        <button class="qty-btn minus" data-id="${item.id}">−</button>
+        <span class="qty-num" id="qty-${item.id}">${qty}</span>
+        <button class="qty-btn plus" data-id="${item.id}">+</button>
+      </div>`;
   return `
     <div class="menu-card">
       <div class="menu-visual">${visual}</div>
@@ -59,11 +76,7 @@ function menuCardHtml(item) {
       </div>
       <div class="menu-foot">
         <div class="menu-price">${riel(item.price)}<small>${usd(item.price)}</small></div>
-        <div class="qty-control ${qty ? "" : "empty"}" id="ctrl-${item.id}">
-          <button class="qty-btn minus" data-id="${item.id}">−</button>
-          <span class="qty-num" id="qty-${item.id}">${qty}</span>
-          <button class="qty-btn plus" data-id="${item.id}">+</button>
-        </div>
+        ${footControl}
       </div>
     </div>`;
 }
@@ -164,6 +177,11 @@ function renderMenu() {
 const menuList = document.getElementById("menu-list");
 
 menuList.addEventListener("click", e => {
+  const choose = e.target.closest(".btn-choose");
+  if (choose) {
+    openCustomize(parseInt(choose.dataset.id));
+    return;
+  }
   const plus = e.target.closest(".qty-btn.plus");
   const minus = e.target.closest(".qty-btn.minus");
   if (!plus && !minus) return;
@@ -183,8 +201,153 @@ menuList.addEventListener("click", e => {
   updateCartFab();
 });
 
+/* ── Product customize screen ────────────────────────────────────
+   Produk dengan modifier group (has_modifiers) buka layar ini, bukan
+   qty-stepper langsung -- customer wajib pilih 1 opsi per grup wajib
+   sebelum bisa nambah ke keranjang. */
+let customizeProduct = null;
+let customizeGroups = [];
+let customizeSelections = {};  // { group_id: option_id }
+let customizeQty = 1;
+
+async function openCustomize(productId) {
+  const result = await api(`/api/menu/${productId}`);
+  if (!result.ok) {
+    tg?.showAlert?.(result.error || "Gagal memuat produk.");
+    return;
+  }
+  customizeProduct = result.product;
+  customizeGroups = result.modifier_groups;
+  customizeSelections = {};
+  customizeQty = 1;
+  document.getElementById("customize-title").textContent = customizeProduct.name;
+  renderCustomizeBody();
+  show("screen-customize");
+}
+
+function customizeUnitPrice() {
+  let price = customizeProduct.price;
+  for (const g of customizeGroups) {
+    const opt = g.options.find(o => o.id === customizeSelections[g.id]);
+    if (opt) price += opt.price_delta;
+  }
+  return price;
+}
+
+function customizeAllRequiredFilled() {
+  return customizeGroups.every(g => !g.is_required || customizeSelections[g.id] != null);
+}
+
+function modifierOptionCardHtml(group, opt) {
+  const selected = customizeSelections[group.id] === opt.id;
+  const visual = opt.image_url
+    ? `<img src="${opt.image_url}" alt="${opt.name}" loading="lazy"
+           onload="this.nextElementSibling.style.display='none'"
+           onerror="this.style.display='none'" />
+       <div class="modifier-visual-fallback">🍽️</div>`
+    : `<div class="modifier-visual-fallback">🍽️</div>`;
+  return `
+    <div class="modifier-card ${selected ? "selected" : ""}" data-group-id="${group.id}" data-option-id="${opt.id}">
+      <div class="modifier-visual">${visual}</div>
+      <div class="modifier-name">${escapeHtml(opt.name)}</div>
+      <div class="modifier-delta">${opt.price_delta > 0 ? "+" + riel(opt.price_delta) : "Gratis"}</div>
+    </div>`;
+}
+
+function modifierGroupHtml(group) {
+  return `
+    <div class="modifier-group">
+      <div class="modifier-group-title">
+        ${escapeHtml(group.name)}
+        ${group.is_required ? `<span class="required-badge">Wajib pilih 1</span>` : ""}
+      </div>
+      <div class="modifier-grid" data-group-id="${group.id}">
+        ${group.options.map(o => modifierOptionCardHtml(group, o)).join("")}
+      </div>
+    </div>`;
+}
+
+function renderCustomizeBody() {
+  const body = document.getElementById("customize-body");
+  body.innerHTML = `
+    <div class="customize-product-header">
+      <div class="customize-product-name">${escapeHtml(customizeProduct.name)}</div>
+      ${customizeProduct.description ? `<div class="customize-product-desc">${escapeHtml(customizeProduct.description)}</div>` : ""}
+      <div class="customize-product-price">${riel(customizeProduct.price)}</div>
+    </div>
+    ${customizeGroups.map(modifierGroupHtml).join("")}
+    <div class="customize-qty-row">
+      <span>Jumlah</span>
+      <div class="qty-control">
+        <button class="qty-btn minus" id="customize-qty-minus">−</button>
+        <span class="qty-num" id="customize-qty-num">${customizeQty}</span>
+        <button class="qty-btn plus" id="customize-qty-plus">+</button>
+      </div>
+    </div>`;
+  updateCustomizeSubmit();
+}
+
+function updateCustomizeSubmit() {
+  const btn = document.getElementById("btn-customize-submit");
+  const ready = customizeAllRequiredFilled();
+  btn.disabled = !ready;
+  btn.textContent = ready
+    ? `Tambah • ${riel(customizeUnitPrice() * customizeQty)}`
+    : "Pilih dulu semua opsi";
+}
+
+document.getElementById("customize-body").addEventListener("click", e => {
+  const card = e.target.closest(".modifier-card");
+  if (card) {
+    const groupId = parseInt(card.dataset.groupId);
+    const optionId = parseInt(card.dataset.optionId);
+    customizeSelections[groupId] = optionId;
+    const group = customizeGroups.find(g => g.id === groupId);
+    const grid = document.querySelector(`.modifier-grid[data-group-id="${groupId}"]`);
+    if (group && grid) {
+      grid.innerHTML = group.options.map(o => modifierOptionCardHtml(group, o)).join("");
+    }
+    updateCustomizeSubmit();
+    return;
+  }
+  if (e.target.id === "customize-qty-plus") {
+    customizeQty++;
+    document.getElementById("customize-qty-num").textContent = customizeQty;
+    updateCustomizeSubmit();
+    return;
+  }
+  if (e.target.id === "customize-qty-minus") {
+    if (customizeQty > 1) customizeQty--;
+    document.getElementById("customize-qty-num").textContent = customizeQty;
+    updateCustomizeSubmit();
+  }
+});
+
+document.getElementById("btn-customize-submit").addEventListener("click", () => {
+  if (!customizeAllRequiredFilled()) return;
+  const modifiers = customizeGroups.map(g => {
+    const opt = g.options.find(o => o.id === customizeSelections[g.id]);
+    return {
+      group_id: g.id, option_id: opt.id,
+      group_name: g.name, option_name: opt.name, price_delta: opt.price_delta,
+    };
+  });
+  const key = `${customizeProduct.id}:${modifiers.map(m => m.option_id).sort((a, b) => a - b).join(",")}`;
+  if (cart[key]) {
+    cart[key].qty += customizeQty;
+  } else {
+    cart[key] = { item: customizeProduct, qty: customizeQty, modifiers };
+  }
+  tg?.HapticFeedback?.notificationOccurred("success");
+  updateCartFab();
+  show("screen-menu");
+});
+
 function cartSubtotal() {
-  return Object.values(cart).reduce((s, { item, qty }) => s + item.price * qty, 0);
+  return Object.values(cart).reduce((s, { item, qty, modifiers }) => {
+    const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
+    return s + (item.price + delta) * qty;
+  }, 0);
 }
 
 function updateCartFab() {
@@ -201,11 +364,11 @@ document.getElementById("cart-items").addEventListener("click", e => {
   const plus = e.target.closest(".qty-btn.plus");
   const minus = e.target.closest(".qty-btn.minus");
   if (!plus && !minus) return;
-  const id = parseInt((plus || minus).dataset.id);
-  if (plus) { cart[id].qty++; }
+  const key = (plus || minus).dataset.key;
+  if (plus) { cart[key].qty++; }
   else {
-    cart[id].qty--;
-    if (cart[id].qty === 0) delete cart[id];
+    cart[key].qty--;
+    if (cart[key].qty === 0) delete cart[key];
   }
   renderCart();
   updateCartFab();
@@ -214,43 +377,51 @@ document.getElementById("cart-items").addEventListener("click", e => {
 document.getElementById("cart-items").addEventListener("input", e => {
   const input = e.target.closest(".cart-item-note-input");
   if (!input) return;
-  const id = parseInt(input.dataset.id);
-  if (!cart[id]) return;
-  cart[id].note = input.value;
+  const key = input.dataset.key;
+  if (!cart[key]) return;
+  cart[key].note = input.value;
 });
 
 function renderCart() {
   const container = document.getElementById("cart-items");
-  const entries = Object.values(cart);
+  const entries = Object.entries(cart);
 
   if (!entries.length) {
     container.innerHTML = `<div class="empty-cart">🛒 Keranjang kosong</div>`;
   } else {
-    container.innerHTML = entries.map(({ item, qty, note }) => `
+    container.innerHTML = entries.map(([key, { item, qty, note, modifiers }]) => {
+      const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
+      const unitPrice = item.price + delta;
+      const modsText = (modifiers || []).map(m => m.option_name).join(", ");
+      return `
       <div class="cart-item">
         <div class="cart-item-row">
           <span class="cart-emoji">${item.emoji || "☕"}</span>
           <div class="cart-item-info">
             <div class="cart-item-name">${item.name}</div>
-            <div class="cart-item-price">${riel(item.price)} × ${qty} = <strong>${riel(item.price * qty)}</strong></div>
+            ${modsText ? `<div class="cart-item-mods">${escapeHtml(modsText)}</div>` : ""}
+            <div class="cart-item-price">${riel(unitPrice)} × ${qty} = <strong>${riel(unitPrice * qty)}</strong></div>
           </div>
           <div class="qty-control">
-            <button class="qty-btn minus" data-id="${item.id}">−</button>
+            <button class="qty-btn minus" data-key="${key}">−</button>
             <span class="qty-num">${qty}</span>
-            <button class="qty-btn plus" data-id="${item.id}">+</button>
+            <button class="qty-btn plus" data-key="${key}">+</button>
           </div>
         </div>
-        <input type="text" class="cart-item-note-input" data-id="${item.id}"
+        <input type="text" class="cart-item-note-input" data-key="${key}"
                placeholder="+ catatan untuk item ini (opsional)"
                value="${escapeAttr(note || "")}" maxlength="200" />
-      </div>`).join("");
+      </div>`;
+    }).join("");
   }
 
   updatePriceSummary();
   const empty = !entries.length;
   const belowMin = minOrder > 0 && cartSubtotal() < minOrder;
-  document.getElementById("btn-pay-cash").disabled = empty || belowMin;
+  const expressBlocksCash = selectedDeliveryType === "express";
+  document.getElementById("btn-pay-cash").disabled = empty || belowMin || expressBlocksCash;
   document.getElementById("btn-pay-aba").disabled = empty || belowMin;
+  document.getElementById("delivery-express-cash-warning").classList.toggle("hidden", !expressBlocksCash);
 }
 
 function updatePriceSummary() {
@@ -312,17 +483,33 @@ document.getElementById("addr-custom").addEventListener("input", e => {
   _updateMinOrder();
 });
 
+/* ── Delivery method picker ───────────────────────────────────── */
+document.getElementById("btn-delivery-internal").addEventListener("click", () => _selectDeliveryType("internal"));
+document.getElementById("btn-delivery-express").addEventListener("click", () => _selectDeliveryType("express"));
+
+function _selectDeliveryType(type) {
+  selectedDeliveryType = type;
+  document.getElementById("btn-delivery-internal").classList.toggle("active", type === "internal");
+  document.getElementById("btn-delivery-express").classList.toggle("active", type === "express");
+  document.getElementById("delivery-express-note").classList.toggle("hidden", type !== "express");
+  renderCart();
+}
+
 /* ── Checkout ─────────────────────────────────────────────────── */
 async function doCheckout(payMethod, onSuccess = showSuccess) {
-  const items = Object.values(cart).map(({ item, qty, note }) => ({
-    item_id: item.id, qty, note: (note || "").trim(),
-  }));
+  const items = Object.values(cart).map(({ item, qty, note, modifiers }) => {
+    const entry = { item_id: item.id, qty, note: (note || "").trim() };
+    if (modifiers?.length) {
+      entry.modifiers = modifiers.map(m => ({ group_id: m.group_id, option_id: m.option_id }));
+    }
+    return entry;
+  });
   const note = document.getElementById("note-input").value.trim();
   const addr = document.getElementById("addr-custom").value.trim() || selectedAddr;
 
   const result = await api("/api/checkout", {
     method: "POST",
-    body: JSON.stringify({ items, note, payment_method: payMethod, address: addr }),
+    body: JSON.stringify({ items, note, payment_method: payMethod, address: addr, delivery_type: selectedDeliveryType }),
   });
 
   if (result.ok) {
@@ -374,6 +561,7 @@ function clearCart() {
     _updateMinOrder();
     _closePicker();
   }
+  _selectDeliveryType("internal");
   updateCartFab();
 }
 
@@ -391,13 +579,15 @@ function _ordersHtml(orders) {
     const payBadge = o.payment_status === "PAID"
       ? `<span class="pay-badge paid">Lunas</span>`
       : `<span class="pay-badge unpaid">Belum Bayar</span>`;
+    const badge = expressBadgeInfo(o);
+    const expressChip = badge ? `<span class="express-chip ${badge.cls}">${badge.text}</span>` : "";
     return `
       <div class="order-card" data-id="${o.id}">
         <div class="order-card-header">
           <span class="order-id">Order #${o.id}</span>
           <span class="order-status-badge ${o.status.toLowerCase()}">${o.status_label}</span>
         </div>
-        <div class="order-card-meta">${o.created_at} ${payBadge}</div>
+        <div class="order-card-meta">${o.created_at} ${payBadge} ${expressChip}</div>
         <div class="order-card-total">${riel(o.total)}</div>
       </div>`;
   }).join("");
@@ -448,6 +638,7 @@ async function _fetchOrderDetail(id) {
         <span>${escapeHtml(i.item_name)} × ${i.qty}</span>
         <span>${riel(i.unit_price * i.qty)}</span>
       </div>
+      ${modifierText(i) ? `<div class="detail-item-note">🧩 ${escapeHtml(modifierText(i))}</div>` : ""}
       ${i.item_note ? `<div class="detail-item-note">📝 ${escapeHtml(i.item_note)}</div>` : ""}
     </div>`
   ).join("");
@@ -473,6 +664,7 @@ async function _fetchOrderDetail(id) {
     </div>
     <div class="detail-summary">
       ${o.address ? `<div class="detail-row"><span>Alamat</span><span>${escapeHtml(o.address)}</span></div>` : ""}
+      ${expressBadgeInfo(o) ? `<div class="detail-row"><span>Kurir</span><span>${expressBadgeInfo(o).text}</span></div>` : ""}
       <div class="detail-row detail-total"><span>Total</span><span>${riel(o.total)}</span></div>
       ${payHtml}
       ${o.note ? `<div class="detail-note">📝 ${escapeHtml(o.note)}</div>` : ""}
@@ -582,6 +774,7 @@ document.querySelectorAll(".back-btn[data-target]").forEach(btn => {
   try {
     const [menuData, tiersData] = await Promise.all([api("/api/menu"), api("/api/address-tiers")]);
     menu = menuData.categories || {};
+    document.getElementById("express-fee-amount").textContent = riel(menuData.express_fee_estimate || 0);
     addressTiers = { tiers: tiersData.tiers || {}, default: tiersData.default || 0 };
     _updateMinOrder();
     document.getElementById("closed-banner")?.classList.toggle("hidden", menuData.open !== false);

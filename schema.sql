@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS orders (
     total          INTEGER GENERATED ALWAYS AS (subtotal) STORED,
 
     address        TEXT,                               -- alamat tujuan dari address picker di cart, field sendiri (bukan dicampur ke note)
+
+    -- Kurir Express (opt-in per order). Status "menunggu lokasi" / "menunggu booking kurir"
+    -- DIDERIVE dari delivery_type + timestamp di bawah, BUKAN kolom status baru — kolom
+    -- `status` tetap murni kitchen state machine (state_machine.py tidak disentuh).
+    delivery_type            TEXT NOT NULL DEFAULT 'internal',  -- 'internal' | 'express'
+    customer_lat             REAL,
+    customer_lng             REAL,
+    location_requested_at    TEXT,    -- UTC, diisi pas bot minta share location
+    location_received_at     TEXT,    -- UTC, diisi pas customer share location
+    express_reminder_sent_at TEXT,    -- UTC, flag reminder sekali-kirim, survive restart bot
+
     note           TEXT,
     cancel_reason  TEXT,                               -- alasan force-cancel admin (Stok habis/Request customer/Kesalahan input/Lainnya)
     admin_msg_id   INTEGER,                            -- message_id kartu order di chat admin
@@ -49,6 +60,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     unit_price INTEGER NOT NULL,           -- riel, snapshot saat checkout
     line_total INTEGER GENERATED ALWAYS AS (qty * unit_price) STORED,
     item_note  TEXT,                       -- catatan custom per item, verbatim, tidak diparsing
+    modifiers_json TEXT,                   -- snapshot pilihan modifier (JSON), NULL kalau produk gak punya modifier group
     FOREIGN KEY (order_id) REFERENCES orders(id)
 );
 
@@ -77,4 +89,26 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     created_at TEXT DEFAULT (datetime('now')),          -- UTC
     updated_at TEXT DEFAULT (datetime('now')),          -- UTC
     FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+-- Modifier group untuk produk komposit (mis. "Nasi Campur Pilih Sendiri").
+-- Produk tanpa baris di modifier_groups berperilaku persis seperti sebelumnya (no-op).
+CREATE TABLE IF NOT EXISTS modifier_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id  INTEGER NOT NULL,
+    name        TEXT    NOT NULL,
+    min_select  INTEGER NOT NULL DEFAULT 1,
+    max_select  INTEGER NOT NULL DEFAULT 1,
+    is_required INTEGER NOT NULL DEFAULT 1,   -- 1=wajib, 0=opsional
+    FOREIGN KEY (product_id) REFERENCES menu_items(id)
+);
+
+CREATE TABLE IF NOT EXISTS modifier_options (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id     INTEGER NOT NULL,
+    name         TEXT    NOT NULL,
+    price_delta  INTEGER NOT NULL DEFAULT 0,  -- riel, boleh 0
+    image_url    TEXT,
+    is_available INTEGER NOT NULL DEFAULT 1,  -- konvensi sama dengan menu_items.available
+    FOREIGN KEY (group_id) REFERENCES modifier_groups(id)
 );

@@ -73,6 +73,18 @@ def init_db() -> None:
             )
         if "address" not in cols:
             conn.execute("ALTER TABLE orders ADD COLUMN address TEXT")
+        if "delivery_type" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN delivery_type TEXT NOT NULL DEFAULT 'internal'")
+        if "customer_lat" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN customer_lat REAL")
+        if "customer_lng" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN customer_lng REAL")
+        if "location_requested_at" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN location_requested_at TEXT")
+        if "location_received_at" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN location_received_at TEXT")
+        if "express_reminder_sent_at" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN express_reminder_sent_at TEXT")
         conn.execute(
             "UPDATE orders SET payment_method='ABA' WHERE note LIKE '[Transfer ABA]%'"
         )
@@ -82,3 +94,5 @@ def init_db() -> None:
         cols_oi = [r[1] for r in conn.execute("PRAGMA table_info(order_items)").fetchall()]
         if "item_note" not in cols_oi:
             conn.execute("ALTER TABLE order_items ADD COLUMN item_note TEXT")
+        if "modifiers_json" not in cols_oi:
+            conn.execute("ALTER TABLE order_items ADD COLUMN modifiers_json TEXT")

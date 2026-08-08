@@ -127,6 +127,64 @@ def get_latest_unpaid_order(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def get_pending_express_location_order(user_id: int) -> dict | None:
+    """Order Express milik user yang masih nunggu Share Location. Dipakai handle_location
+    & handle_text_fallback (owner_console.py) buat branch TANPA handler baru (PTB cuma
+    dispatch ke handler pertama yang match filter dalam satu grup)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT * FROM orders
+               WHERE user_id=? AND delivery_type='express'
+                 AND location_received_at IS NULL
+                 AND status NOT IN ('Selesai', 'Dibatalkan')
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_express_orders_awaiting_location_reminder(threshold_minutes: int) -> list[dict]:
+    """Order Express yang udah lewat `threshold_minutes` sejak diminta lokasi, belum kirim
+    lokasi, dan belum pernah di-reminder — dipakai reminder loop di main.py."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM orders
+               WHERE delivery_type='express'
+                 AND location_received_at IS NULL
+                 AND express_reminder_sent_at IS NULL
+                 AND location_requested_at IS NOT NULL
+                 AND status NOT IN ('Selesai', 'Dibatalkan')
+                 AND datetime(location_requested_at) <= datetime('now', ?)
+               ORDER BY location_requested_at ASC""",
+            (f"-{threshold_minutes} minutes",),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_express_location_requested(order_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET location_requested_at=datetime('now') WHERE id=?", (order_id,)
+        )
+
+
+def save_express_location(order_id: int, lat: float, lng: float) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE orders SET customer_lat=?, customer_lng=?,
+                   location_received_at=datetime('now'), updated_at=datetime('now')
+               WHERE id=?""",
+            (lat, lng, order_id),
+        )
+
+
+def mark_express_reminder_sent(order_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET express_reminder_sent_at=datetime('now') WHERE id=?", (order_id,)
+        )
+
+
 def set_admin_msg_id(order_id: int, message_id: int) -> None:
     """Simpen message_id kartu order di chat admin, buat reply bukti transfer."""
     with get_conn() as conn:
@@ -251,10 +309,15 @@ def change_payment_method(order_id: int, new_method: str) -> dict:
 
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT payment_method, payment_status FROM orders WHERE id=?", (order_id,)
+            "SELECT payment_method, payment_status, delivery_type FROM orders WHERE id=?", (order_id,)
         ).fetchone()
         if not row:
             return {"ok": False, "error": "Order tidak ditemukan"}
+        if new_method == "CASH" and row["delivery_type"] == "express":
+            return {
+                "ok": False,
+                "error": "Order Kurir Express cuma bisa dibayar ABA/Transfer, tidak bisa ganti ke Cash.",
+            }
         if row["payment_status"] == "PAID":
             return {"ok": False, "error": "Order sudah lunas, metode bayar terkunci"}
 

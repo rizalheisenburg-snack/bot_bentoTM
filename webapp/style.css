@@ -17,6 +17,7 @@
   --line:      rgba(255, 255, 255, .07);
   --green:     #34D399;
   --red:       #F87171;
+  --purple:    #A78BFA;
   --accent:    #4FACFE;
   --link:      #4FACFE;
   --btn:       #2E7CF6;
@@ -489,6 +490,87 @@ html, body {
 }
 .btn-pay-method.hidden { display: none; }
 
+/* ── Product customize ────────────────────────────────────────── */
+.customize-body {
+  flex: 1; overflow-y: auto;
+  padding: 14px 16px 24px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.customize-product-header { padding: 0 2px; }
+.customize-product-name { font-weight: 800; font-size: 17px; }
+.customize-product-desc { color: var(--hint); font-size: 12.5px; margin-top: 4px; }
+.customize-product-price { color: var(--blue2); font-weight: 800; font-size: 15px; margin-top: 6px; }
+
+.modifier-group-title {
+  font-weight: 700; font-size: 13.5px;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.required-badge {
+  font-size: 10px; font-weight: 700;
+  color: var(--hint);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.modifier-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.modifier-card {
+  background: linear-gradient(160deg, var(--card2), var(--card));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 6px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.modifier-card.selected {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--blue2), var(--glow);
+}
+.modifier-visual {
+  position: relative;
+  overflow: hidden;
+  height: 80px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 34px; line-height: 1;
+}
+.modifier-visual img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: cover;
+}
+.modifier-visual-fallback { font-size: 34px; line-height: 1; }
+.modifier-name { font-weight: 700; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
+.modifier-delta { font-size: 11px; font-weight: 700; color: var(--blue2); padding: 0 2px; }
+
+.customize-qty-row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 700; font-size: 13.5px;
+  padding: 4px 2px;
+}
+.customize-footer {
+  background: rgba(29, 33, 44, .92);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 16px;
+  border-top: 1px solid var(--line);
+}
+.btn-choose {
+  padding: 8px 18px;
+  background: var(--grad); color: #fff;
+  border: none; border-radius: 12px;
+  font-size: 13px; font-weight: 800;
+  cursor: pointer; box-shadow: var(--glow);
+}
+.cart-item-mods { color: var(--hint); font-size: 11.5px; margin-top: 2px; }
+
 /* ── Success screen ───────────────────────────────────────────── */
 #screen-success {
   align-items: center; justify-content: center;
@@ -536,6 +618,27 @@ html, body {
 }
 .pay-badge.paid   { background: rgba(52,211,153,.15); color: var(--green); }
 .pay-badge.unpaid { background: rgba(248,113,113,.15); color: var(--red); }
+
+/* ── Delivery method (checkout) ─────────────────────────────────── */
+.delivery-label { font-size: 12.5px; color: var(--hint); margin-bottom: 6px; }
+.delivery-method-row { display: flex; gap: 8px; }
+.btn-delivery-method {
+  flex: 1; padding: 10px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); font-size: 12.5px; font-weight: 700;
+  cursor: pointer;
+}
+.btn-delivery-method.active { border-color: var(--blue2); background: rgba(79,172,254,.12); }
+.btn-delivery-method:disabled { opacity: .4; cursor: not-allowed; }
+.delivery-express-note, .delivery-warning {
+  font-size: 11.5px; margin-top: 6px; padding: 8px 10px; border-radius: 10px;
+}
+.delivery-express-note { background: rgba(167,139,250,.12); color: var(--purple); }
+.delivery-warning { background: rgba(248,113,113,.12); color: var(--red); }
+
+/* ── Express badge (shared shape with .pay-badge) ───────────────── */
+.express-chip { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin-left: 6px; }
+.express-chip.waiting-location { background: rgba(251,191,36,.15); color: #FBBF24; }
+.express-chip.waiting-courier  { background: rgba(167,139,250,.15); color: var(--purple); }
 .section-label {
   font-size: 11.5px; color: var(--hint); display: block; margin-bottom: 8px;
   font-weight: 800; text-transform: uppercase; letter-spacing: .1em;

@@ -6,7 +6,7 @@
   <title>Warteg JAGO MASAK</title>
   <link rel="icon" href="img/jagomasak.jpg" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=16" />
+  <link rel="stylesheet" href="style.css?v=18" />
 </head>
 <body>
 
@@ -66,6 +66,20 @@
       </div>
     </div>
 
+    <div class="delivery-section">
+      <div class="delivery-label">🚚 Metode Antar:</div>
+      <div class="delivery-method-row">
+        <button id="btn-delivery-internal" class="btn-delivery-method active" data-type="internal">🚴 Kurir Internal · Gratis</button>
+        <button id="btn-delivery-express" class="btn-delivery-method" data-type="express">🚀 Kurir Express · Estimasi <span id="express-fee-amount">-</span></button>
+      </div>
+      <div id="delivery-express-note" class="delivery-express-note hidden">
+        💰 Ongkos Kurir Express dibayar <strong>cash langsung ke kurir</strong> saat barang sampai (di luar pembayaran order ini).
+      </div>
+      <div id="delivery-express-cash-warning" class="delivery-warning hidden">
+        ⚠️ Kurir Express hanya tersedia untuk pembayaran ABA/Transfer.
+      </div>
+    </div>
+
     <div class="note-row">
       <textarea id="note-input" placeholder="Catatan untuk dapur (opsional)" rows="2"></textarea>
     </div>
@@ -79,6 +93,18 @@
       <button id="btn-pay-cash" class="btn-pay-method">💵 Cash</button>
       <button id="btn-pay-aba" class="btn-pay-method aba">🏦 ABA</button>
     </div>
+  </div>
+</div>
+
+<!-- ── PRODUCT CUSTOMIZE ───────────────────────────────────────── -->
+<div id="screen-customize" class="screen">
+  <div class="topbar">
+    <button class="icon-btn back-btn" data-target="screen-menu">‹</button>
+    <span class="topbar-title" id="customize-title">Pilih Menu</span>
+  </div>
+  <div id="customize-body" class="customize-body"></div>
+  <div class="customize-footer">
+    <button id="btn-customize-submit" class="btn-pay-method aba" disabled>Tambah</button>
   </div>
 </div>
 
@@ -113,6 +139,6 @@
 </div>
 
 <script src="common.js?v=1"></script>
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>

@@ -14,3 +14,12 @@ async function api(path, opts = {}) {
 
 const riel = n => `${Number(n).toLocaleString("km-KH")}៛`;
 const escapeHtml = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/* Badge Express diturunkan dari delivery_type + timestamp, BUKAN kolom status baru
+   (kitchen state machine di server tidak disentuh). Dipakai app.js (customer) & admin.js (kanban). */
+function expressBadgeInfo(o) {
+  if (o.delivery_type !== "express") return null;
+  return o.location_received_at
+    ? { cls: "waiting-courier",  text: "🚀 Express · Menunggu Booking Kurir" }
+    : { cls: "waiting-location", text: "🚀 Express · Menunggu Lokasi" };
+}

@@ -14,9 +14,22 @@ let currentDetailId = null;
 
 const TERMINAL_STATUSES = new Set(["Selesai", "Dibatalkan"]);
 
+function modifierText(item) {
+  if (!item.modifiers_json) return "";
+  try {
+    return JSON.parse(item.modifiers_json).map(m => m.option_name).join(", ");
+  } catch {
+    return "";
+  }
+}
+
 function itemSummary(items) {
   return (items || [])
-    .map(i => `${escapeHtml(i.item_name)} × ${i.qty} — ${riel(i.unit_price * i.qty)}`)
+    .map(i => {
+      const mods = modifierText(i);
+      return `${escapeHtml(i.item_name)} × ${i.qty} — ${riel(i.unit_price * i.qty)}`
+        + (mods ? `<br><small>· ${escapeHtml(mods)}</small>` : "");
+    })
     .join("<br>");
 }
 
@@ -67,6 +80,8 @@ function cardHtml(o) {
   const payChip = o.payment_status === "PAID"
     ? `<span class="pay-chip paid">Lunas</span>`
     : `<span class="pay-chip unpaid">Belum Bayar</span>`;
+  const badge = expressBadgeInfo(o);
+  const expressChip = badge ? `<span class="express-chip ${badge.cls}">${badge.text}</span>` : "";
   const name = escapeHtml(o.full_name || o.username || o.user_id);
   // Kirim lewat bot (chat_id = o.user_id), bukan deep-link Telegram personal —
   // deep-link butuh akun admin udah "kenal" user itu (gak bisa dijamin),
@@ -78,6 +93,7 @@ function cardHtml(o) {
         <span class="card-name">#${o.id} ${name}</span>
         ${chatBtn}
         ${payChip}
+        ${expressChip}
       </div>
       <div class="card-summary">${itemSummary(o.items)}</div>
       ${stale ? `<span class="card-timer">⏱ ${mins} menit</span>` : ""}
@@ -141,6 +157,7 @@ function renderDetail() {
       <span>${escapeHtml(i.item_name)} × ${i.qty}</span>
       <span>${riel(i.unit_price * i.qty)}</span>
     </div>
+    ${modifierText(i) ? `<div class="detail-item-note">🧩 ${escapeHtml(modifierText(i))}</div>` : ""}
     ${i.item_note ? `<div class="detail-item-note">📝 ${escapeHtml(i.item_note)}</div>` : ""}
   `).join("");
 
@@ -151,6 +168,14 @@ function renderDetail() {
   const methodLabel = o.payment_method === "ABA" ? "🏦 ABA" : "💵 CASH";
   const reasonHtml = o.status === "Dibatalkan" && o.cancel_reason
     ? `<div class="detail-row"><span>Alasan Cancel</span><span>${escapeHtml(o.cancel_reason)}</span></div>` : "";
+
+  const expressBadge = expressBadgeInfo(o);
+  const deliveryHtml = o.delivery_type === "express"
+    ? `<div class="detail-row"><span>Kurir</span><span>${expressBadge.text}</span></div>
+       ${(o.customer_lat != null && o.customer_lng != null)
+          ? `<div class="detail-row"><span>Lokasi</span><a class="maps-link" href="https://maps.google.com/?q=${o.customer_lat},${o.customer_lng}" target="_blank" rel="noopener">📍 Buka Google Maps</a></div>`
+          : `<div class="detail-row"><span>Lokasi</span><span class="hint">⏳ Belum dikirim</span></div>`}`
+    : "";
 
   const nextStatus = NEXT_STATUS[o.status];
   const actionButtons = [];
@@ -171,6 +196,7 @@ function renderDetail() {
     <div class="detail-row"><span>Metode Bayar</span><span>${methodLabel}</span></div>
     ${payHtml}
     ${reasonHtml}
+    ${deliveryHtml}
     ${o.note ? `<div class="detail-note">📝 ${escapeHtml(o.note)}</div>` : ""}
     <div class="detail-items">${itemsHtml}</div>
     <div class="detail-row detail-total"><span>Total</span><span>${riel(o.total)}</span></div>

@@ -21,6 +21,7 @@ def _build_receipt(order: dict) -> dict:
                 "unit_price": i["unit_price"],
                 "line_total": i["line_total"],
                 "note": i.get("item_note") or "",
+                "modifiers": json.loads(i["modifiers_json"]) if i.get("modifiers_json") else [],
             }
             for i in order.get("items", [])
         ],

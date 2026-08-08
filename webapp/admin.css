@@ -18,6 +18,7 @@
   --green:     #34D399;
   --red:       #F87171;
   --amber:     #FBBF24;
+  --purple:    #A78BFA;
   --radius:    14px;
   --shadow:    0 8px 24px rgba(0, 0, 0, .35);
 }
@@ -155,7 +156,7 @@ html, body {
   border-color: var(--amber);
   border-width: 2px;
 }
-.card-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.card-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
 .card-name {
   font-weight: 700; font-size: 13.5px;
   flex: 1; min-width: 0;
@@ -169,6 +170,13 @@ html, body {
 }
 .pay-chip.paid   { background: rgba(52,211,153,.15); color: var(--green); }
 .pay-chip.unpaid { background: rgba(248,113,113,.15); color: var(--red); }
+.express-chip {
+  flex-shrink: 0; font-size: 10.5px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+}
+.express-chip.waiting-location { background: rgba(251,191,36,.15); color: var(--amber); }
+.express-chip.waiting-courier  { background: rgba(167,139,250,.15); color: var(--purple); }
+.maps-link { color: var(--blue2); text-decoration: underline; }
 .icon-btn-sm {
   flex-shrink: 0;
   background: var(--card);

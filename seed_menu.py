@@ -130,9 +130,126 @@ def seed_menu(conn):
     print(f"Seeded {len(MENU)} menu items.")
 
 
+# ── Produk komposit: "Nasi Campur Pilih Sendiri" ────────────────────────────
+# 4 modifier group, masing-masing wajib pilih tepat 1 opsi.
+
+NASI_CAMPUR_PRODUCT = {
+    "name": "Nasi Campur Pilih Sendiri",
+    "description": None,
+    "price": 10_000,
+    "category": "Menu Nasi",
+    "emoji": "🍱",
+    "image_url": None,
+}
+
+NASI_CAMPUR_GROUPS = [
+    {
+        "name": "Nasi",
+        "min_select": 1, "max_select": 1, "is_required": 1,
+        "options": [
+            {"name": "Nasi Putih", "price_delta": 0},
+            {"name": "Nasi Merah", "price_delta": 4_000},
+            {"name": "Nasi Uduk", "price_delta": 4_000},
+        ],
+    },
+    {
+        "name": "Telur",
+        "min_select": 1, "max_select": 1, "is_required": 1,
+        "options": [
+            {"name": "Telor Bulat Balado", "price_delta": 0},
+            {"name": "Telor Dadar", "price_delta": 1_000},
+            {"name": "Telor Krispy", "price_delta": 4_000},
+        ],
+    },
+    {
+        "name": "Sayur",
+        "min_select": 1, "max_select": 1, "is_required": 1,
+        "options": [
+            {"name": "Capcay", "price_delta": 0},
+            {"name": "Brokoli Tahu", "price_delta": 0},
+            {"name": "Sawi Putih", "price_delta": 0},
+            {"name": "Kangkung", "price_delta": 0},
+            {"name": "Jengkol", "price_delta": 5_000},
+        ],
+    },
+    {
+        "name": "Lauk/Daging",
+        "min_select": 1, "max_select": 1, "is_required": 1,
+        "options": [
+            {"name": "Ayam Goreng Bawang Putih", "price_delta": 0},
+            {"name": "Ayam Wijen", "price_delta": 0},
+            {"name": "Ayam Asam Manis", "price_delta": 0},
+            {"name": "Ayam Goreng Mentega", "price_delta": 0},
+            {"name": "Rendang", "price_delta": 1_000},
+        ],
+    },
+]
+
+
+def seed_nasi_campur_modifiers(conn):
+    """
+    Insert produk "Nasi Campur Pilih Sendiri" + 4 modifier group + semua opsinya.
+    Idempotent (cek by name sebelum insert) -- aman dipanggil tanpa syarat tiap
+    restart, termasuk di production di mana menu_items sudah tidak pernah kosong
+    lagi (jadi seed_menu() di atas tidak akan jalan ulang untuk nge-seed ini).
+    """
+    cur = conn.cursor()
+
+    row = cur.execute(
+        "SELECT id FROM menu_items WHERE name = ?", (NASI_CAMPUR_PRODUCT["name"],)
+    ).fetchone()
+    if row:
+        product_id = row[0]
+    else:
+        cur.execute(
+            """
+            INSERT INTO menu_items (name, description, price, category, emoji, image_url, available)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                NASI_CAMPUR_PRODUCT["name"],
+                NASI_CAMPUR_PRODUCT["description"],
+                NASI_CAMPUR_PRODUCT["price"],
+                NASI_CAMPUR_PRODUCT["category"],
+                NASI_CAMPUR_PRODUCT["emoji"],
+                NASI_CAMPUR_PRODUCT["image_url"],
+                1,
+            ),
+        )
+        product_id = cur.lastrowid
+
+    for group in NASI_CAMPUR_GROUPS:
+        grow = cur.execute(
+            "SELECT id FROM modifier_groups WHERE product_id = ? AND name = ?",
+            (product_id, group["name"]),
+        ).fetchone()
+        if grow:
+            continue
+        cur.execute(
+            """
+            INSERT INTO modifier_groups (product_id, name, min_select, max_select, is_required)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (product_id, group["name"], group["min_select"], group["max_select"], group["is_required"]),
+        )
+        group_id = cur.lastrowid
+        for opt in group["options"]:
+            cur.execute(
+                """
+                INSERT INTO modifier_options (group_id, name, price_delta, image_url, is_available)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (group_id, opt["name"], opt["price_delta"], opt.get("image_url"), 1),
+            )
+
+    conn.commit()
+    print("Seeded 'Nasi Campur Pilih Sendiri' modifier groups.")
+
+
 if __name__ == "__main__":
     import sqlite3
     # Sesuaikan path db & import config kalau perlu
     conn = sqlite3.connect(config.DB_PATH)
     seed_menu(conn)
+    seed_nasi_campur_modifiers(conn)
     conn.close()

@@ -35,6 +35,7 @@ from state_machine import (
     get_user_orders,
     mark_paid,
     set_admin_msg_id,
+    set_express_location_requested,
     transition,
 )
 
@@ -101,15 +102,58 @@ def _checkout_rate_limited(user_id: int) -> bool:
 async def api_menu(request):
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM menu_items WHERE available=1 ORDER BY category, name"
+            """SELECT m.*,
+                      EXISTS(SELECT 1 FROM modifier_groups g WHERE g.product_id = m.id) AS has_modifiers
+               FROM menu_items m WHERE m.available=1 ORDER BY m.category, m.name"""
         ).fetchall()
     by_cat: dict[str, list] = {}
     for r in rows:
         d = dict(r)
+        d["has_modifiers"] = bool(d["has_modifiers"])
         by_cat.setdefault(d["category"], []).append(d)
     return _json({
         "categories": by_cat,
         "open": get_setting("shop_open", "1") == "1",
+        "express_fee_estimate": config.EXPRESS_DELIVERY_FEE_ESTIMATE,
+    })
+
+
+@routes.get("/api/menu/{product_id}")
+async def api_menu_detail(request):
+    product_id = int(request.match_info["product_id"])
+    with get_conn() as conn:
+        product_row = conn.execute(
+            "SELECT * FROM menu_items WHERE id=?", (product_id,)
+        ).fetchone()
+        if not product_row:
+            return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
+        group_rows = conn.execute(
+            "SELECT * FROM modifier_groups WHERE product_id=? ORDER BY id", (product_id,)
+        ).fetchall()
+        option_rows = conn.execute(
+            """SELECT o.* FROM modifier_options o
+               JOIN modifier_groups g ON g.id = o.group_id
+               WHERE g.product_id=? ORDER BY o.id""",
+            (product_id,),
+        ).fetchall()
+
+    options_by_group: dict[int, list] = {}
+    for o in option_rows:
+        d = dict(o)
+        d["is_available"] = bool(d["is_available"])
+        options_by_group.setdefault(d["group_id"], []).append(d)
+
+    modifier_groups = []
+    for g in group_rows:
+        d = dict(g)
+        d["is_required"] = bool(d["is_required"])
+        d["options"] = options_by_group.get(d["id"], [])
+        modifier_groups.append(d)
+
+    return _json({
+        "ok": True,
+        "product": dict(product_row),
+        "modifier_groups": modifier_groups,
     })
 
 
@@ -145,6 +189,7 @@ async def api_checkout(request):
             note=note,
             payment_method=body.get("payment_method", "CASH"),
             address=body.get("address", ""),
+            delivery_type=body.get("delivery_type", "internal"),
         )
         # Kirim notif ke owner kalau order masuk (skip kalau ini duplikat double-tap/retry —
         # order-nya sudah dinotif/diprint pas submit yang pertama)
@@ -158,6 +203,10 @@ async def api_checkout(request):
             result["mirror_sent"] = mirror_sent
             if not mirror_sent and BOT_USERNAME:
                 result["bot_deeplink"] = f"https://t.me/{BOT_USERNAME}"
+        # Minta lokasi buat order Express — sengaja TIDAK di-gate oleh auto_paid
+        # (order Express gratis pun tetap butuh lokasi buat booking kurir).
+        if result.get("ok") and not result.get("duplicate") and result.get("delivery_type") == "express":
+            await _send_express_location_request(request, result.get("order_id"))
         return _json(result, 200 if result["ok"] else 400)
     except Exception:
         log.exception("checkout error")
@@ -248,6 +297,36 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
     except Exception:
         log.exception("gagal kirim mirror order ke user")
         return False
+
+
+async def _send_express_location_request(request: web.Request, order_id: int | None) -> None:
+    """Minta customer share location + catat location_requested_at, biar handle_location
+    (owner_console.py) dan reminder loop (main.py) tau order ini lagi nunggu lokasi."""
+    if not order_id:
+        return
+    bot = request.app["bot"]
+    if not bot:
+        return
+    try:
+        o = get_order(order_id)
+        if not o or o.get("delivery_type") != "express":
+            return
+        set_express_location_requested(order_id)
+        await bot.send_message(
+            chat_id=o["user_id"],
+            text=(
+                f"🚀 *Order #{order_id}* kamu pakai *Kurir Express*.\n\n"
+                "Mohon kirim *Share Location* (bukan foto peta/screenshot) lewat tombol 📎 "
+                "di Telegram, biar kami bisa proses pengantaran ya 🙏\n\n"
+                "⚠️ Ongkos kurir express *dibayar cash langsung ke kurir* saat barang sampai, "
+                "terpisah dari pembayaran order ini."
+            ),
+            parse_mode="Markdown",
+        )
+    except Forbidden:
+        log.warning("gagal kirim minta lokasi express order #%s: user belum start bot", order_id)
+    except Exception:
+        log.exception("gagal kirim minta lokasi express, order #%s", order_id)
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────

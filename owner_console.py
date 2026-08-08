@@ -38,8 +38,10 @@ from state_machine import (
     get_latest_unpaid_order,
     get_omzet,
     get_order,
+    get_pending_express_location_order,
     get_pending_orders,
     mark_paid,
+    save_express_location,
     transition,
 )
 
@@ -84,6 +86,13 @@ def _order_text(o: dict, *, for_admin: bool = True) -> str:
     pay_status = "✅ LUNAS" if o["payment_status"] == "PAID" else "❌ BELUM BAYAR"
     paid_info = f" ({o['paid_currency']})" if o.get("paid_currency") else ""
     address_line = f"📍 Alamat  : {o['address']}\n" if o.get("address") else ""
+    delivery_line = ""
+    if for_admin and o.get("delivery_type") == "express":
+        if o.get("location_received_at"):
+            maps_link = f"https://maps.google.com/?q={o['customer_lat']},{o['customer_lng']}"
+            delivery_line = f"🚀 Kurir  : Express — {maps_link}\n"
+        else:
+            delivery_line = "🚀 Kurir  : Express — ⏳ menunggu share location\n"
     note_line = f"📝 Note    : {o.get('note') or '-'}\n\n"
     payment_method_line = ""
     if for_admin:
@@ -96,6 +105,7 @@ def _order_text(o: dict, *, for_admin: bool = True) -> str:
         f"🧾 *Order #{o['id']}*\n"
         f"👤 {o.get('full_name') or o.get('username') or o['user_id']}\n"
         f"{address_line}"
+        f"{delivery_line}"
         f"📋 Status  : {STATUS_LABEL.get(o['status'], o['status'])}\n"
         f"💳 Bayar   : {pay_status}{paid_info}\n"
         f"{payment_method_line}"
@@ -386,6 +396,22 @@ async def handle_location(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == OWNER_ID:
         return
     loc = update.message.location
+    user_id = update.effective_user.id
+
+    pending_express = get_pending_express_location_order(user_id)
+    if pending_express:
+        order_id = pending_express["id"]
+        save_express_location(order_id, loc.latitude, loc.longitude)
+        await update.message.reply_text(
+            f"✅ Lokasi buat Order #{order_id} diterima! Kami segera proses booking Kurir Express-nya ya 🙏",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await _notify_owner_express_location(ctx.bot, order_id)
+        from server import broadcast_order_update  # lazy import, hindari circular import
+        await broadcast_order_update(order_id)
+        return
+
+    # ── Alur lama (cek radius/minimal order), tidak berubah ─────────────────────
     distance_km = haversine(loc.latitude, loc.longitude, CAFE_LAT, CAFE_LON)
     min_order = get_min_order(loc.latitude, loc.longitude, CAFE_LAT, CAFE_LON)
     set_user_min_order(update.effective_user.id, min_order, distance_km)
@@ -396,9 +422,39 @@ async def handle_location(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def _notify_owner_express_location(bot, order_id: int) -> None:
+    o = get_order(order_id)
+    if not o:
+        return
+    maps_link = f"https://maps.google.com/?q={o['customer_lat']},{o['customer_lng']}"
+    try:
+        await bot.send_message(
+            chat_id=OWNER_ID,
+            text=(
+                f"📍 *Lokasi Express masuk — Order #{order_id}*\n{maps_link}\n\n"
+                "Silakan booking GrabExpress / forward ke grup kurir ya 🙏"
+            ),
+            parse_mode="Markdown",
+            reply_to_message_id=o.get("admin_msg_id"),
+        )
+    except Exception:
+        log.exception("gagal notif owner lokasi express order #%s", order_id)
+
+
 async def handle_text_fallback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == OWNER_ID:
         return
+
+    pending_express = get_pending_express_location_order(update.effective_user.id)
+    if pending_express:
+        await update.message.reply_text(
+            f"🚀 Order #{pending_express['id']} kamu masih nunggu *Share Location*, bukan teks/foto peta.\n"
+            "Tap tombol 📎 di Telegram → *Location* → *Share My Current Location* ya 🙏",
+            parse_mode="Markdown",
+            reply_markup=_location_keyboard(),
+        )
+        return
+
     if not _LOCATION_KEYWORD_RE.search(update.message.text or ""):
         return
     await update.message.reply_text(
