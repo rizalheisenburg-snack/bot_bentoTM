@@ -405,6 +405,43 @@ async def api_owner_pay(request):
     return _json(result, 200 if result["ok"] else 400)
 
 
+@routes.post("/api/owner/orders/{order_id}/message")
+async def api_owner_send_message(request):
+    """Kirim pesan ke pelanggan lewat bot — gak pakai deep-link Telegram
+    personal karena itu butuh akun admin udah pernah 'kenal' user itu
+    (access_hash), yang gak bisa dijamin. Bot selalu bisa kirim ke chat_id
+    manapun yang pernah /start, jadi ini satu-satunya jalan yang reliable."""
+    user = _auth(request)
+    if not user or user["id"] != OWNER_ID:
+        return _json({"ok": False, "error": "Forbidden"}, 403)
+    oid = int(request.match_info["order_id"])
+    o = get_order(oid)
+    if not o:
+        return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return _json({"ok": False, "error": "Pesan gak boleh kosong."}, 400)
+    bot = request.app["bot"]
+    if not bot:
+        return _json({"ok": False, "error": "Bot tidak aktif."}, 500)
+    try:
+        await bot.send_message(
+            chat_id=o["user_id"],
+            text=f"💬 *Pesan dari Admin:*\n\n{text}",
+            parse_mode="Markdown",
+        )
+        return _json({"ok": True})
+    except Forbidden:
+        return _json({
+            "ok": False,
+            "error": "Gagal kirim: pelanggan belum pernah /start bot atau sudah blokir bot.",
+        }, 409)
+    except Exception:
+        log.exception("gagal kirim pesan admin ke customer, order #%s", oid)
+        return _json({"ok": False, "error": "Gagal kirim pesan."}, 500)
+
+
 # ── Kanban admin ─────────────────────────────────────────────────────────────
 
 @routes.get("/admin")

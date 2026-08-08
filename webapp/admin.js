@@ -75,15 +75,6 @@ function renderBoard() {
   // ga perlu attach per-card/per-tombol di sini lagi.
 }
 
-function chatLinkFor(o) {
-  // username diutamakan: link t.me bisa dibuka reliable via openTelegramLink().
-  // tg://user?id= cuma fallback last-resort — cuma jalan kalau akun admin udah
-  // pernah "kenal" (resolve) user itu, jadi seringnya diam aja buat customer baru.
-  if (o.username) return `https://t.me/${o.username}`;
-  if (o.user_id) return `tg://user?id=${o.user_id}`;
-  return null;
-}
-
 function cardHtml(o) {
   const mins = minutesSince(o.status_changed_at);
   const stale = !TERMINAL_STATUSES.has(o.status) && mins > 15;
@@ -91,10 +82,10 @@ function cardHtml(o) {
     ? `<span class="pay-chip paid">Lunas</span>`
     : `<span class="pay-chip unpaid">Belum Bayar</span>`;
   const name = escapeHtml(o.full_name || o.username || o.user_id);
-  const chatLink = chatLinkFor(o);
-  const chatBtn = chatLink
-    ? `<button class="icon-btn-sm btn-chat" data-link="${escapeHtml(chatLink)}" title="Chat pelanggan">💬</button>`
-    : `<button class="icon-btn-sm btn-chat" disabled title="Chat tidak tersedia">💬</button>`;
+  // Kirim lewat bot (chat_id = o.user_id), bukan deep-link Telegram personal —
+  // deep-link butuh akun admin udah "kenal" user itu (gak bisa dijamin),
+  // sedangkan bot selalu bisa kirim ke siapa pun yang pernah /start.
+  const chatBtn = `<button class="icon-btn-sm btn-chat" data-id="${o.id}" title="Chat pelanggan">💬</button>`;
   return `
     <div class="card ${stale ? "stale" : ""}" data-id="${o.id}">
       <div class="card-top">
@@ -112,14 +103,10 @@ function cardHtml(o) {
 document.getElementById("board").addEventListener("click", e => {
   const chatBtn = e.target.closest(".btn-chat");
   if (chatBtn) {
-    if (!chatBtn.disabled && chatBtn.dataset.link) {
-      const link = chatBtn.dataset.link;
-      // Di dalam Mini App, window.open ke t.me/tg:// gampang di-block WebView-nya.
-      // openTelegramLink() adalah cara resmi Telegram buat lompat ke chat lain.
-      if (tg && link.startsWith("https://t.me/")) tg.openTelegramLink(link);
-      else window.open(link, "_blank");
-    }
-    return; // baik enabled maupun disabled, jangan lanjut ke openDetail
+    const id = parseInt(chatBtn.dataset.id);
+    openDetail(id);
+    renderChatCompose(orders[id]);
+    return;
   }
   const card = e.target.closest(".card");
   if (card) openDetail(parseInt(card.dataset.id));
@@ -181,6 +168,7 @@ function renderDetail() {
 
   const nextStatus = NEXT_STATUS[o.status];
   const actionButtons = [];
+  actionButtons.push(`<button class="btn-action secondary" id="btn-chat-open">💬 Chat Pelanggan</button>`);
   if (nextStatus) {
     actionButtons.push(`<button class="btn-action" id="btn-next-status">${NEXT_LABEL[nextStatus]}</button>`);
   }
@@ -219,6 +207,35 @@ function renderDetail() {
   });
 
   document.getElementById("btn-force-cancel")?.addEventListener("click", () => renderCancelReasons(o));
+  document.getElementById("btn-chat-open")?.addEventListener("click", () => renderChatCompose(o));
+}
+
+function renderChatCompose(o) {
+  const name = escapeHtml(o.full_name || o.username || o.user_id);
+  document.getElementById("detail-body").innerHTML = `
+    <div class="detail-note">Kirim pesan ke ${name} lewat bot:</div>
+    <textarea id="chat-text" class="chat-textarea" rows="4" placeholder="Tulis pesan..."></textarea>
+    <div class="action-row">
+      <button class="btn-action" id="btn-chat-send">📨 Kirim</button>
+      <button class="btn-action secondary" id="btn-chat-back">« Batal</button>
+    </div>
+  `;
+  document.getElementById("chat-text").focus();
+  document.getElementById("btn-chat-send").addEventListener("click", async () => {
+    const text = document.getElementById("chat-text").value.trim();
+    if (!text) return;
+    const r = await api(`/api/owner/orders/${o.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    if (r.ok) {
+      tg?.HapticFeedback?.notificationOccurred("success");
+      closeDetail();
+    } else {
+      tg?.showAlert?.(r.error || "Gagal kirim pesan.");
+    }
+  });
+  document.getElementById("btn-chat-back").addEventListener("click", renderDetail);
 }
 
 function renderCancelReasons(o) {
