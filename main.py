@@ -8,7 +8,7 @@ from aiohttp import web
 from config import PORT, EXPRESS_LOCATION_REMINDER_MINUTES, EXPRESS_REMINDER_CHECK_INTERVAL_SECONDS
 from db import get_conn, init_db
 from owner_console import build_application
-from seed_menu import seed_menu, seed_nasi_campur_modifiers
+from seed_menu import add_missing_menu_items, backfill_menu_images, seed_menu, seed_nasi_campur_modifiers
 from server import AccessLogger, build_app
 from state_machine import get_express_orders_awaiting_location_reminder, mark_express_reminder_sent
 
@@ -57,6 +57,8 @@ async def main():
         if count == 0:
             seed_menu(conn)
         seed_nasi_campur_modifiers(conn)
+        add_missing_menu_items(conn)
+        backfill_menu_images(conn)
 
     # Bot di-init dulu supaya bot.send_message bisa dipakai HTTP server
     tg_app = build_application()
