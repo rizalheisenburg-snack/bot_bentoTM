@@ -4,7 +4,7 @@ Connect OUT ke server (VPS) lewat WebSocket /ws/printer (bukan sebaliknya),
 supaya gak kena masalah NAT/firewall jaringan lokal PC ini. Auto-reconnect
 kalau koneksi putus. Jalankan: python print_agent.py
 
-Environment (.env di folder yang sama, lihat print_agent.env.example):
+Environment (lihat print_agent.env.example):
   PRINT_SERVER_WS_URL   contoh: wss://domain-vps-lo.com/ws/printer
   PRINT_AGENT_TOKEN     harus sama persis dengan PRINTER_AGENT_TOKEN di server
   PRINTER_VID           default 0x0FE6 (APOS-P80A-BW)
@@ -15,11 +15,16 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 
 import aiohttp
 from dotenv import load_dotenv
 
-load_dotenv()
+# Prioritaskan .env.printagent (dipakai kalau script ini numpuk di folder yang
+# sama dengan main app, yang punya .env sendiri) — baru fallback ke .env biasa
+# (dipakai kalau print_agent.py berdiri sendiri di PC/folder terpisah).
+_agent_env = Path(__file__).parent / ".env.printagent"
+load_dotenv(_agent_env if _agent_env.exists() else None)
 
 logging.basicConfig(
     level=logging.INFO,
