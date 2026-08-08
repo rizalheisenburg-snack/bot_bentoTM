@@ -12,6 +12,7 @@ from geo import get_min_order_by_address
 from state_machine import auto_pay_if_free
 
 MAX_AGE = 86_400  # 24 jam anti-replay
+DUPLICATE_WINDOW = 15  # detik — order identik dari user yang sama dalam window ini dianggap double-tap/retry, bukan order baru
 
 
 def verify_init_data(init_data: str) -> dict | None:
@@ -34,6 +35,33 @@ def verify_init_data(init_data: str) -> dict | None:
         return None
 
     return json.loads(params.get("user", "{}"))
+
+
+def _find_recent_duplicate(conn, user_id, valid_items, note, payment_method, address):
+    """Cari order dari user yang sama, isinya identik, dalam DUPLICATE_WINDOW detik terakhir.
+    Nangkep double-tap tombol order / retry otomatis karena koneksi putus-nyambung."""
+    row = conn.execute(
+        """SELECT * FROM orders
+           WHERE user_id = ? AND datetime(created_at) >= datetime('now', ?)
+           ORDER BY id DESC LIMIT 1""",
+        (user_id, f"-{DUPLICATE_WINDOW} seconds"),
+    ).fetchone()
+    if not row:
+        return None
+    if (
+        (row["note"] or "") != note
+        or (row["payment_method"] or "") != payment_method
+        or (row["address"] or None) != (address or None)
+    ):
+        return None
+    existing_items = conn.execute(
+        "SELECT item_id, qty, item_note FROM order_items WHERE order_id = ?", (row["id"],)
+    ).fetchall()
+    existing_sig = sorted((r["item_id"], r["qty"], r["item_note"]) for r in existing_items)
+    new_sig = sorted((item_id, qty, item_note) for item_id, _, qty, _, item_note in valid_items)
+    if existing_sig != new_sig:
+        return None
+    return dict(row)
 
 
 def checkout(
@@ -102,6 +130,17 @@ def checkout(
     full_name = (user.get("first_name", "") + " " + user.get("last_name", "")).strip()
 
     with get_conn() as conn:
+        dup = _find_recent_duplicate(conn, user_id, valid_items, note, payment_method, address)
+        if dup:
+            return {
+                "ok": True,
+                "order_id": dup["id"],
+                "subtotal": dup["subtotal"],
+                "total": dup["total"],
+                "auto_paid": dup["payment_status"] == "PAID",
+                "unavailable_items": unavailable_items,
+                "duplicate": True,
+            }
         cur = conn.execute(
             """INSERT INTO orders
                (user_id, username, full_name, status, subtotal, note, payment_method, address)
@@ -122,7 +161,6 @@ def checkout(
             "INSERT INTO order_items (order_id, item_id, item_name, qty, unit_price, item_note) VALUES (?,?,?,?,?,?)",
             [(order_id, *row) for row in valid_items],
         )
-        conn.commit()
 
     # Auto-pay kalau total = 0
     auto_paid = auto_pay_if_free(order_id)

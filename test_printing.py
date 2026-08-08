@@ -215,6 +215,41 @@ async def test_ws_printer_ack_failed_marks_job_resendable(fake_user, seeded_menu
     assert jobs[0]["error"] == "printer offline"
 
 
+class _FakeBot:
+    def __init__(self):
+        self.messages = []
+
+    async def send_message(self, chat_id, text, parse_mode=None, reply_to_message_id=None):
+        self.messages.append((chat_id, text))
+
+
+@pytest.mark.asyncio
+async def test_ws_printer_ack_failed_alerts_owner_once(fake_user, seeded_menu):
+    order_id = _make_order(fake_user)
+    job = create_print_job(order_id)
+    bot = _FakeBot()
+
+    app = server.build_app(bot=bot)
+    async with TestClient(TestServer(app)) as client:
+        async with client.ws_connect(f"/ws/printer?token={PRINT_TOKEN}") as ws:
+            await ws.receive_json(timeout=2)  # push awal
+            await ws.send_json(
+                {"type": "ack", "job_id": job["id"], "status": "failed", "error": "printer offline"}
+            )
+            await asyncio.sleep(0.05)
+            # ack gagal lagi buat job yang sama — owner cuma boleh dialert sekali per job
+            await ws.send_json(
+                {"type": "ack", "job_id": job["id"], "status": "failed", "error": "printer offline"}
+            )
+            await asyncio.sleep(0.05)
+
+    assert len(bot.messages) == 1
+    chat_id, text = bot.messages[0]
+    assert chat_id == config.OWNER_ID
+    assert f"#{order_id}" in text
+    assert "printer offline" in text
+
+
 @pytest.mark.asyncio
 async def test_push_print_job_queues_when_no_agent_connected(fake_user, seeded_menu):
     order_id = _make_order(fake_user)

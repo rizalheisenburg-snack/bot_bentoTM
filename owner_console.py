@@ -164,7 +164,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     shop_status = "🔓 BUKA" if get_setting("shop_open", "1") == "1" else "🔒 TUTUP"
     await update.message.reply_text(
-        "☕ *Jakarta Cafe — Owner Panel*\n\n"
+        "🍱 *Bento x Jago Masak — Owner Panel*\n\n"
         f"Status warung: *{shop_status}*\n\n"
         "/pending — order masuk\n"
         "/order \\<id\\> — detail 1 order\n"
@@ -327,7 +327,7 @@ async def cmd_push(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         await ctx.bot.send_message(
             chat_id=target_uid,
-            text=f"*Dari Jakarta Cafe*\n\n{msg}\n\nOrder sekarang:",
+            text=f"*Dari Bento x Jago Masak*\n\n{msg}\n\nOrder sekarang:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("Buka Menu", url=WEBAPP_URL)
@@ -516,7 +516,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             conn.execute(
                 "UPDATE menu_items SET available = 1 - available WHERE id=?", (item_id,)
             )
-            conn.commit()
             rows = conn.execute(
                 "SELECT id, name, price, available FROM menu_items ORDER BY category, name"
             ).fetchall()

@@ -25,15 +25,10 @@ CREATE TABLE IF NOT EXISTS orders (
     payment_status TEXT    NOT NULL DEFAULT 'UNPAID',  -- UNPAID | PAID
     paid_currency  TEXT,                               -- 'RIEL' | 'USD' (apa yang masuk laci)
     paid_at        TEXT,                               -- UTC datetime, wajib UTC
-    payment_method TEXT,                               -- 'CASH' | 'ABA' 
-
-    -- -- Voucher
-    -- voucher_used   INTEGER DEFAULT 0,      -- 1 = voucher dipakai
-    -- voucher_value  INTEGER DEFAULT 0,      -- riel yang dipotong voucher (maks 10000)
+    payment_method TEXT,                               -- 'CASH' | 'ABA'
 
     -- Harga (GENERATED supaya ga bisa drift manual)
     subtotal       INTEGER NOT NULL,       -- sum(line_total) sebelum voucher
-    -- discount       INTEGER GENERATED ALWAYS AS (voucher_value) STORED,
     total          INTEGER GENERATED ALWAYS AS (subtotal) STORED,
 
     address        TEXT,                               -- alamat tujuan dari address picker di cart, field sendiri (bukan dicampur ke note)

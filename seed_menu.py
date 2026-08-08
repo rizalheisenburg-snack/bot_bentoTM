@@ -105,21 +105,6 @@ MENU: list[dict] = [
 ]
 
 
-# def seed_menu(conn):
-#     """
-#     Insert semua item MENU ke database.
-#     Sesuaikan nama tabel/kolom dengan schema.sql project lo
-#     (contoh asumsi: tabel `items` dengan kolom category, name, price).
-#     """
-#     cur = conn.cursor()
-#     for item in MENU:
-#         cur.execute(
-#             "INSERT INTO items (category, name, price) VALUES (?, ?, ?)",
-#             (item["category"], item["name"], item["price"]),
-#         )
-#     conn.commit()
-#     print(f"Seeded {len(MENU)} menu items.")
-
 def seed_menu(conn):
     """
     Insert semua item MENU ke database (tabel menu_items).

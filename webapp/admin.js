@@ -1,9 +1,6 @@
 /* ── Telegram WebApp init ─────────────────────────────────────── */
-const tg = window.Telegram?.WebApp;
-tg?.ready();
+/* tg, INIT_DATA, api(), riel(), escapeHtml() ada di common.js (di-load sebelum file ini) */
 tg?.expand();
-
-const INIT_DATA = tg?.initData || "";
 
 /* ── State ────────────────────────────────────────────────────── */
 const STATUSES = ["Diterima", "Diproses", "Siap", "Selesai", "Dibatalkan"];
@@ -15,17 +12,6 @@ const STALE_MS = 15 * 60 * 1000;
 let orders = {};          // { order_id: order }
 let currentDetailId = null;
 
-/* ── Helpers ──────────────────────────────────────────────────── */
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", "X-Init-Data": INIT_DATA },
-    ...opts,
-  });
-  return res.json();
-}
-
-const riel = n => `${Number(n).toLocaleString("km-KH")}៛`;
-const escapeHtml = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const TERMINAL_STATUSES = new Set(["Selesai", "Dibatalkan"]);
 
 function itemSummary(items) {

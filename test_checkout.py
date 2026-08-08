@@ -188,6 +188,71 @@ def test_checkout_drops_unavailable_items_and_still_accepts_order(fake_user, see
     order = get_order(result["order_id"])
     assert order["status"] == "Diterima"
 
+# ── Duplicate / double-tap guard ──────────────────────────────────────────────
+
+def test_checkout_duplicate_within_window_returns_same_order(fake_user, seeded_menu):
+    first = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 2}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    second = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 2}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert first["ok"] and second["ok"]
+    assert second["order_id"] == first["order_id"]
+    assert second.get("duplicate") is True
+    with get_conn() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) c FROM orders WHERE user_id=?", (fake_user["id"],)
+        ).fetchone()["c"]
+    assert count == 1
+
+def test_checkout_different_items_not_treated_as_duplicate(fake_user, seeded_menu):
+    first = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    second = checkout(
+        user=fake_user,
+        items=[{"item_id": 2, "qty": 1}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert first["ok"] and second["ok"]
+    assert second["order_id"] != first["order_id"]
+    assert not second.get("duplicate")
+
+def test_checkout_duplicate_outside_window_creates_new_order(fake_user, seeded_menu):
+    first = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE orders SET created_at = datetime('now', '-1 hour') WHERE id = ?",
+            (first["order_id"],),
+        )
+        conn.commit()
+    second = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],
+        note="[KD] test",
+        payment_method="CASH",
+    )
+    assert second["ok"]
+    assert second["order_id"] != first["order_id"]
+    assert not second.get("duplicate")
+
+
 # ── Minimal order per lokasi ─────────────────────────────────────────────────
 
 def test_get_user_min_order_returns_none_when_never_set():

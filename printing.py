@@ -40,7 +40,6 @@ def create_print_job(order_id: int) -> dict | None:
             "INSERT INTO print_jobs (order_id, payload, status) VALUES (?, ?, 'pending')",
             (order_id, json.dumps(receipt, ensure_ascii=False)),
         )
-        conn.commit()
         job_id = cur.lastrowid
     return {"id": job_id, "order_id": order_id, "status": "pending", "payload": receipt}
 
@@ -62,13 +61,18 @@ def get_resendable_print_jobs() -> list[dict]:
     return jobs
 
 
+def get_print_job(job_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def mark_job_sent(job_id: int) -> None:
     with get_conn() as conn:
         conn.execute(
             "UPDATE print_jobs SET status='sent', attempts=attempts+1, updated_at=datetime('now') WHERE id=?",
             (job_id,),
         )
-        conn.commit()
 
 
 def mark_job_printed(job_id: int) -> None:
@@ -77,7 +81,6 @@ def mark_job_printed(job_id: int) -> None:
             "UPDATE print_jobs SET status='printed', updated_at=datetime('now') WHERE id=?",
             (job_id,),
         )
-        conn.commit()
 
 
 def mark_job_failed(job_id: int, error: str) -> None:
@@ -86,4 +89,3 @@ def mark_job_failed(job_id: int, error: str) -> None:
             "UPDATE print_jobs SET status='failed', error=?, updated_at=datetime('now') WHERE id=?",
             (error, job_id),
         )
-        conn.commit()

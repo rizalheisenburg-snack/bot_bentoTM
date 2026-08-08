@@ -31,7 +31,6 @@ def set_setting(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
-        conn.commit()
 
 
 def set_user_min_order(user_id: int, min_order: int, distance_km: float) -> None:
@@ -45,7 +44,6 @@ def set_user_min_order(user_id: int, min_order: int, distance_km: float) -> None
                  updated_at=excluded.updated_at""",
             (user_id, min_order, distance_km),
         )
-        conn.commit()
 
 
 def get_user_min_order(user_id: int) -> dict | None:
@@ -84,4 +82,3 @@ def init_db() -> None:
         cols_oi = [r[1] for r in conn.execute("PRAGMA table_info(order_items)").fetchall()]
         if "item_note" not in cols_oi:
             conn.execute("ALTER TABLE order_items ADD COLUMN item_note TEXT")
-        conn.commit()

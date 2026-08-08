@@ -12,7 +12,21 @@
       "Bash(find . -maxdepth 1 -iname \"*.sh\" -o -maxdepth 1 -iname \"Makefile\" -o -maxdepth 1 -iname \"deploy*\")",
       "Bash(sed 's/=.*/=***/' .env)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('inject_menu.py', encoding='utf-8'\\).read\\(\\)\\)\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(pip show *)",
+      "Bash(python -c \"import aiohttp; print\\(aiohttp.__version__\\)\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8080/api/menu)",
+      "Bash(curl -s -i --path-as-is \"http://127.0.0.1:8080/../.env\")",
+      "Bash(curl -s -i --path-as-is \"http://127.0.0.1:8080/../config.py\")",
+      "Bash(curl -s -i \"http://127.0.0.1:8080/%2e%2e/.env\")",
+      "Bash(git commit -m ' *)",
+      "Bash(powershell -Command 'Get-Process python -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowTitle -eq '\\\\'''\\\\''} | Select-Object Id')",
+      "Bash(taskkill //F //IM python.exe //FI \"WINDOWTITLE eq *\")",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name = 'python.exe'\")",
+      "PowerShell(Stop-Process -Id 6652 -Force -ErrorAction SilentlyContinue)",
+      "Bash(python -m pytest -q -k duplicate)",
+      "Bash(python -m pytest -q test_printing.py)"
     ]
   }
 }

@@ -489,35 +489,8 @@ html, body {
 }
 .btn-pay-method.hidden { display: none; }
 
-/* ── ABA screen ───────────────────────────────────────────────── */
-.aba-inner {
-  display: flex; flex-direction: column;
-  align-items: center; padding: 24px 20px;
-  flex: 1;
-}
-.aba-hint { color: var(--hint); font-size: 14px; text-align: center; margin-bottom: 20px; }
-.aba-qr {
-  width: min(80vw, 280px); height: min(80vw, 280px);
-  object-fit: contain; border-radius: 18px;
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-}
-.aba-total {
-  font-size: 22px; font-weight: 800;
-  color: var(--blue2); margin: 16px 0 0;
-}
-.aba-order-id { font-size: 14px; font-weight: 700; color: var(--hint); margin-bottom: 4px; }
-.aba-note { color: var(--hint); font-size: 12px; text-align: center; margin: 12px 0 0; }
-.aba-btn-row { width: 100%; margin-top: 16px; }
-
-#screen-aba-proof .success-inner a.btn-primary {
-  display: block; box-sizing: border-box;
-  text-align: center; text-decoration: none;
-}
-#screen-aba-proof .success-inner p { margin-bottom: 20px; }
-
 /* ── Success screen ───────────────────────────────────────────── */
-#screen-success, #screen-aba-proof {
+#screen-success {
   align-items: center; justify-content: center;
 }
 .success-inner { text-align: center; padding: 32px; max-width: 320px; }

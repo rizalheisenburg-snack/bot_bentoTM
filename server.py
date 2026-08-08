@@ -1,21 +1,27 @@
 """HTTP server — aiohttp. Melayani API + static webapp."""
 from __future__ import annotations
+import asyncio
 import hmac
 import json
 import logging
 import pathlib
+import time
 
 log = logging.getLogger(__name__)
 
 from aiohttp import WSMsgType, web
+from aiohttp.abc import AbstractAccessLogger
 from telegram.error import Forbidden
 
+import config
 from checkout_flow import checkout, verify_init_data
 from config import BOT_USERNAME, OWNER_ID, PRINTER_AGENT_TOKEN
 from db import get_conn, get_setting
 from geo import ADDRESS_MIN_ORDER, DEFAULT_ADDRESS_MIN_ORDER
+from owner_console import _order_keyboard, _order_text, cancel_notif_text
 from printing import (
     create_print_job,
+    get_print_job,
     get_resendable_print_jobs,
     mark_job_failed,
     mark_job_printed,
@@ -28,6 +34,7 @@ from state_machine import (
     get_order,
     get_user_orders,
     mark_paid,
+    set_admin_msg_id,
     transition,
 )
 
@@ -45,6 +52,47 @@ def _json(data, status=200):
 
 def _auth(request: web.Request) -> dict | None:
     return verify_init_data(request.headers.get("X-Init-Data", ""))
+
+
+def _require_user(request: web.Request) -> tuple[dict | None, web.Response | None]:
+    """(user, None) kalau initData valid, (None, response 401) kalau enggak."""
+    user = _auth(request)
+    if not user:
+        return None, _json({"ok": False, "error": "Unauthorized"}, 401)
+    return user, None
+
+
+def _require_owner(request: web.Request) -> tuple[dict | None, web.Response | None]:
+    """(user, None) kalau initData valid dan dia OWNER_ID, (None, response) kalau enggak."""
+    user, err = _require_user(request)
+    if err:
+        return None, err
+    if user["id"] != OWNER_ID:
+        return None, _json({"ok": False, "error": "Forbidden"}, 403)
+    return user, None
+
+
+def _forbidden_for_order(user: dict, order: dict) -> web.Response | None:
+    """None kalau user berhak akses order ini (pemilik atau owner), response 403 kalau enggak."""
+    if order["user_id"] != user["id"] and user["id"] != OWNER_ID:
+        return _json({"ok": False, "error": "Forbidden"}, 403)
+    return None
+
+
+def _result_json(result: dict) -> web.Response:
+    return _json(result, 200 if result["ok"] else 400)
+
+
+# ── Rate limit checkout per user (anti spam-klik / script) ──────────────────────
+CHECKOUT_MIN_INTERVAL = 2.0  # detik minimal antar percobaan checkout per user
+_last_checkout_attempt: dict[int, float] = {}
+
+
+def _checkout_rate_limited(user_id: int) -> bool:
+    now = time.monotonic()
+    last = _last_checkout_attempt.get(user_id, 0.0)
+    _last_checkout_attempt[user_id] = now
+    return now - last < CHECKOUT_MIN_INTERVAL
 
 
 # ── Menu ──────────────────────────────────────────────────────────────────────
@@ -76,9 +124,13 @@ async def api_address_tiers(request):
 
 @routes.post("/api/checkout")
 async def api_checkout(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
+    user, err = _require_user(request)
+    if err:
+        return err
+    if _checkout_rate_limited(user["id"]):
+        return _json(
+            {"ok": False, "error": "Tunggu sebentar sebelum order lagi ya."}, 429
+        )
     if get_setting("shop_open", "1") != "1":
         return _json(
             {"ok": False, "error": "Warung lagi tutup 🌙 Coba lagi pas jam buka ya."},
@@ -94,21 +146,22 @@ async def api_checkout(request):
             payment_method=body.get("payment_method", "CASH"),
             address=body.get("address", ""),
         )
-        # Kirim notif ke owner kalau order masuk
-        if result.get("ok"):
+        # Kirim notif ke owner kalau order masuk (skip kalau ini duplikat double-tap/retry —
+        # order-nya sudah dinotif/diprint pas submit yang pertama)
+        if result.get("ok") and not result.get("duplicate"):
             await _notify_owner_new_order(request, result.get("order_id"))
             await broadcast_order_update(result.get("order_id"))
             await push_print_job(result.get("order_id"))
         # Kirim mirror ke pelanggan untuk semua order sukses yang bukan auto-paid
-        if result.get("ok") and not result.get("auto_paid"):
+        if result.get("ok") and not result.get("auto_paid") and not result.get("duplicate"):
             mirror_sent = await _send_order_mirror_to_user(request, result.get("order_id"))
             result["mirror_sent"] = mirror_sent
             if not mirror_sent and BOT_USERNAME:
                 result["bot_deeplink"] = f"https://t.me/{BOT_USERNAME}"
         return _json(result, 200 if result["ok"] else 400)
-    except Exception as e:
+    except Exception:
         log.exception("checkout error")
-        return _json({"ok": False, "error": f"Server error: {e}"}, 500)
+        return _json({"ok": False, "error": "Server error, coba lagi ya."}, 500)
 
 
 async def _notify_owner_new_order(request: web.Request, order_id: int | None):
@@ -118,8 +171,6 @@ async def _notify_owner_new_order(request: web.Request, order_id: int | None):
     if not bot:
         return
     try:
-        from owner_console import _order_keyboard, _order_text
-        from state_machine import get_order, set_admin_msg_id
         o = get_order(order_id)
         if not o:
             return
@@ -143,10 +194,6 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
     if not bot:
         return False
     try:
-        from owner_console import _order_text
-        from state_machine import get_order
-        from config import ABA_QR_IMAGE_PATH
-
         o = get_order(order_id)
         if not o:
             return False
@@ -188,7 +235,7 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
         )
 
         if o.get("payment_method") == "ABA":
-            await _send_photo(ABA_QR_IMAGE_PATH)
+            await _send_photo(config.ABA_QR_IMAGE_PATH)
         return True
     except Forbidden:
         # User belum pernah chat/start bot ini — Telegram menolak sendMessage.
@@ -207,45 +254,47 @@ async def _send_order_mirror_to_user(request: web.Request, order_id: int | None)
 
 @routes.get("/api/orders")
 async def api_orders(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
+    user, err = _require_user(request)
+    if err:
+        return err
     return _json({"ok": True, "orders": get_user_orders(user["id"])})
 
 
 @routes.get("/api/orders/active")
 async def api_orders_active(request):
-    user = _auth(request)
-    if not user or user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    _, err = _require_owner(request)
+    if err:
+        return err
     return _json({"ok": True, "orders": get_active_orders()})
 
 
 @routes.get("/api/orders/{order_id}")
 async def api_order_detail(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
+    user, err = _require_user(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     o = get_order(oid)
     if not o:
         return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
-    if o["user_id"] != user["id"] and user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    err = _forbidden_for_order(user, o)
+    if err:
+        return err
     return _json({"ok": True, "order": o})
 
 
 @routes.post("/api/orders/{order_id}/cancel")
 async def api_cancel_order(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
+    user, err = _require_user(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     o = get_order(oid)
     if not o:
         return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
-    if o["user_id"] != user["id"] and user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    err = _forbidden_for_order(user, o)
+    if err:
+        return err
     result = transition(oid, "Dibatalkan", actor="customer")
     if result.get("ok"):
         await broadcast_order_update(oid)
@@ -259,20 +308,21 @@ async def api_cancel_order(request):
                 )
             except Exception:
                 log.exception("gagal notif owner soal cancel")
-    return _json(result, 200 if result["ok"] else 400)
+    return _result_json(result)
 
 
 @routes.post("/api/orders/{order_id}/payment-method")
 async def api_change_payment_method(request):
-    user = _auth(request)
-    if not user:
-        return _json({"ok": False, "error": "Unauthorized"}, 401)
+    user, err = _require_user(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     o = get_order(oid)
     if not o:
         return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
-    if o["user_id"] != user["id"] and user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    err = _forbidden_for_order(user, o)
+    if err:
+        return err
     body = await request.json()
     new_method = body.get("payment_method", "")
     result = change_payment_method(oid, new_method)
@@ -281,7 +331,7 @@ async def api_change_payment_method(request):
         await broadcast_order_update(oid)
         if new_method == "ABA":
             result["reminder"] = "Jangan lupa upload bukti transfer ABA lewat chat ya 🙏"
-    return _json(result, 200 if result["ok"] else 400)
+    return _result_json(result)
 
 
 async def _notify_owner_payment_method_change(request: web.Request, order_id: int, result: dict):
@@ -289,7 +339,6 @@ async def _notify_owner_payment_method_change(request: web.Request, order_id: in
     if not bot:
         return
     try:
-        from owner_console import _order_text, _order_keyboard
         o = get_order(order_id)
         if not o:
             return
@@ -359,6 +408,10 @@ async def broadcast_order_update(order_id: int | None):
 # lewat WebSocket, supaya gak kena masalah NAT/firewall jaringan lokal si PC.
 
 _printer_agent: web.WebSocketResponse | None = None
+_alerted_print_failures: set[int] = set()
+PRINT_RETRY_INTERVAL = 90  # detik — selama agent masih connect, coba cetak ulang job
+                            # yang gagal (misal kertas printer baru diisi ulang tanpa
+                            # perlu restart agent manual)
 
 
 def _auth_printer_ws(request: web.Request) -> bool:
@@ -385,19 +438,35 @@ async def ws_printer(request):
     await ws.prepare(request)
     _printer_agent = ws
     log.info("print-agent terhubung")
+    retry_task = asyncio.create_task(_retry_failed_jobs_loop(ws))
     try:
         await _flush_pending_print_jobs(ws)
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
-                await _handle_printer_ack(msg.data)
+                await _handle_printer_ack(msg.data, request.app["bot"])
     finally:
+        retry_task.cancel()
         if _printer_agent is ws:
             _printer_agent = None
         log.info("print-agent terputus")
     return ws
 
 
-async def _handle_printer_ack(raw: str):
+async def _retry_failed_jobs_loop(ws: web.WebSocketResponse) -> None:
+    """Selagi koneksi agent masih hidup, coba resend job 'failed'/'pending' tiap
+    PRINT_RETRY_INTERVAL detik — supaya printer yang sempat error (kertas habis, dll)
+    lalu dibetulin gak butuh restart agent manual buat lanjut nyetak."""
+    try:
+        while True:
+            await asyncio.sleep(PRINT_RETRY_INTERVAL)
+            if ws.closed:
+                return
+            await _flush_pending_print_jobs(ws)
+    except asyncio.CancelledError:
+        pass
+
+
+async def _handle_printer_ack(raw: str, bot=None):
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
@@ -409,8 +478,34 @@ async def _handle_printer_ack(raw: str):
         return
     if data.get("status") == "printed":
         mark_job_printed(job_id)
+        _alerted_print_failures.discard(job_id)
     else:
-        mark_job_failed(job_id, data.get("error", "unknown error"))
+        error = data.get("error", "unknown error")
+        mark_job_failed(job_id, error)
+        await _alert_owner_print_failed(bot, job_id, error)
+
+
+async def _alert_owner_print_failed(bot, job_id: int, error: str) -> None:
+    """Kasih tau owner sekali (per job) begitu struk gagal cetak, biar ga baru
+    ketauan pas malam udah tutup. Job tetap otomatis di-retry di background
+    (_retry_failed_jobs_loop), jadi ga perlu spam alert tiap kali retry gagal lagi."""
+    if not bot or job_id in _alerted_print_failures:
+        return
+    _alerted_print_failures.add(job_id)
+    job = get_print_job(job_id)
+    order_id = job["order_id"] if job else "?"
+    try:
+        await bot.send_message(
+            chat_id=OWNER_ID,
+            text=(
+                f"⚠️ *Gagal cetak struk order #{order_id}*\n{error}\n\n"
+                "Order tetap masuk, cek printer (kertas/koneksi) — sistem otomatis "
+                "coba cetak ulang tiap 90 detik selama print-agent nyala."
+            ),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        log.exception("gagal kirim alert print-fail ke owner")
 
 
 async def _send_print_job(ws: web.WebSocketResponse, job: dict) -> None:
@@ -456,29 +551,29 @@ async def push_print_job(order_id: int | None) -> None:
 
 @routes.post("/api/owner/orders/{order_id}/status")
 async def api_owner_status(request):
-    user = _auth(request)
-    if not user or user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    _, err = _require_owner(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     body = await request.json()
     result = transition(oid, body.get("status", ""), actor="owner")
     if result.get("ok"):
         await broadcast_order_update(oid)
-    return _json(result, 200 if result["ok"] else 400)
+    return _result_json(result)
 
 
 @routes.post("/api/owner/orders/{order_id}/force-cancel")
 async def api_force_cancel(request):
-    user = _auth(request)
-    if not user or user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    _, err = _require_owner(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     body = await request.json()
     result = force_cancel_order(oid, body.get("reason", ""))
     if result.get("ok"):
         await _notify_customer_force_cancel(request, oid, result)
         await broadcast_order_update(oid)
-    return _json(result, 200 if result["ok"] else 400)
+    return _result_json(result)
 
 
 async def _notify_customer_force_cancel(request: web.Request, order_id: int, result: dict):
@@ -486,7 +581,6 @@ async def _notify_customer_force_cancel(request: web.Request, order_id: int, res
     if not bot:
         return
     try:
-        from owner_console import cancel_notif_text
         o = get_order(order_id)
         if not o:
             return
@@ -501,15 +595,15 @@ async def _notify_customer_force_cancel(request: web.Request, order_id: int, res
 
 @routes.post("/api/owner/orders/{order_id}/pay")
 async def api_owner_pay(request):
-    user = _auth(request)
-    if not user or user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    _, err = _require_owner(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     body = await request.json()
     result = mark_paid(oid, body.get("currency", "RIEL"))
     if result.get("ok"):
         await broadcast_order_update(oid)
-    return _json(result, 200 if result["ok"] else 400)
+    return _result_json(result)
 
 
 @routes.post("/api/owner/orders/{order_id}/message")
@@ -518,9 +612,9 @@ async def api_owner_send_message(request):
     personal karena itu butuh akun admin udah pernah 'kenal' user itu
     (access_hash), yang gak bisa dijamin. Bot selalu bisa kirim ke chat_id
     manapun yang pernah /start, jadi ini satu-satunya jalan yang reliable."""
-    user = _auth(request)
-    if not user or user["id"] != OWNER_ID:
-        return _json({"ok": False, "error": "Forbidden"}, 403)
+    _, err = _require_owner(request)
+    if err:
+        return err
     oid = int(request.match_info["order_id"])
     o = get_order(oid)
     if not o:
@@ -561,13 +655,26 @@ async def admin_page(request):
 @routes.get("/{tail:.*}")
 async def static_files(request):
     tail = request.match_info["tail"] or "index.html"
-    path = WEBAPP_DIR / tail
-    if not path.exists() or not path.is_file():
-        path = WEBAPP_DIR / "index.html"
+    webapp_root = WEBAPP_DIR.resolve()
+    path = (webapp_root / tail).resolve()
+    is_inside = path == webapp_root or webapp_root in path.parents
+    if not is_inside or not path.exists() or not path.is_file():
+        path = webapp_root / "index.html"
     # JS/CSS/img di-cache 1 jam, HTML tidak (supaya update langsung keliatan)
     is_html = path.suffix == ".html"
     headers = {} if is_html else {"Cache-Control": "public, max-age=3600"}
     return web.FileResponse(path, headers=headers)
+
+
+class AccessLogger(AbstractAccessLogger):
+    """Access logger yang buang query string, biar token (initData/ws printer token)
+    di /ws/admin dan /ws/printer nggak ikut ke-log ke stdout/journal."""
+
+    def log(self, request, response, time):
+        self.logger.info(
+            '%s "%s %s" %s %.3fs',
+            request.remote, request.method, request.path, response.status, time,
+        )
 
 
 def build_app(bot=None) -> web.Application:

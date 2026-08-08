@@ -8,7 +8,7 @@ from config import PORT
 from db import get_conn, init_db
 from owner_console import build_application
 from seed_menu import seed_menu
-from server import build_app
+from server import AccessLogger, build_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +31,7 @@ async def main():
 
     # HTTP server (aiohttp)
     http_app = build_app(bot=tg_app.bot)
-    runner = web.AppRunner(http_app)
+    runner = web.AppRunner(http_app, access_log_class=AccessLogger)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()

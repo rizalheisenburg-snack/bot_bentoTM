@@ -82,35 +82,6 @@
   </div>
 </div>
 
-<!-- ── ABA BARCODE ────────────────────────────────────────────── -->
-<div id="screen-aba" class="screen" data-order-id="" data-total="">
-  <div class="topbar">
-    <button id="btn-aba-back" class="icon-btn back-btn" data-target="screen-cart">‹</button>
-    <span class="topbar-title">Transfer ABA</span>
-  </div>
-  <div class="aba-inner">
-    <p id="aba-order-id" class="aba-order-id">Order #0</p>
-    <p class="aba-hint">Scan QR di bawah, lalu transfer sesuai nominal total</p>
-    <img src="img/aba-mat-baru.jpg" alt="ABA QR Code" class="aba-qr" />
-    <p id="aba-total" class="aba-total"></p>
-    <p id="aba-total-usd" class="aba-total" style="font-size:14px;opacity:0.7"></p>
-    <p class="aba-note">Nominal isi sendiri sesuai total order (QR tidak membawa nominal).</p>
-    <div class="aba-btn-row">
-      <button id="btn-aba-sudah" class="btn-primary">Sudah</button>
-      <button id="btn-aba-nanti" class="btn-secondary">Nanti Saja</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── ABA BUKTI TRANSFER ───────────────────────────────────────── -->
-<div id="screen-aba-proof" class="screen">
-  <div class="success-inner">
-    <div class="success-icon">🙏</div>
-    <p id="aba-proof-text">Cek chat kamu dengan bot ini — ada pesan rincian order dari bot. Reply pesan itu dengan screenshot bukti transfer ABA kamu ya 🙏</p>
-    <button id="btn-aba-proof-lanjut" class="btn-primary">Lanjut</button>
-  </div>
-</div>
-
 <!-- ── ORDER SUCCESS ────────────────────────────────────────── -->
 <div id="screen-success" class="screen">
   <div class="success-inner">
@@ -141,6 +112,7 @@
   <div id="order-detail-body" class="order-detail-body"></div>
 </div>
 
-<script src="app.js?v=22"></script>
+<script src="common.js?v=1"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

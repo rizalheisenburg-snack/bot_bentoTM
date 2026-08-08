@@ -1,11 +1,8 @@
 /* ── Telegram WebApp init ─────────────────────────────────────── */
-const tg = window.Telegram?.WebApp;
-tg?.ready();
+/* tg, INIT_DATA, api(), riel(), escapeHtml() ada di common.js (di-load sebelum file ini) */
 tg?.expand();
 tg?.setHeaderColor?.("#14161D");
 tg?.setBackgroundColor?.("#14161D");
-
-const INIT_DATA = tg?.initData || "";
 
 /* ── State ────────────────────────────────────────────────────── */
 const cart = {};       // { item_id: { item, qty, note } }
@@ -14,15 +11,6 @@ let addressTiers = { tiers: {}, default: 0 };  // minimal order per alamat, dari
 let minOrder = 0;      // ambang minimal order (riel) buat alamat yang lagi dipilih
 
 /* ── Helpers ──────────────────────────────────────────────────── */
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", "X-Init-Data": INIT_DATA },
-    ...opts,
-  });
-  return res.json();
-}
-
-const riel = n => `${Number(n).toLocaleString("km-KH")}៛`;
 const escapeAttr = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
 function show(id) {
@@ -457,10 +445,10 @@ async function _fetchOrderDetail(id) {
   const itemsHtml = o.items.map(i => `
     <div class="detail-item-block">
       <div class="detail-item-row">
-        <span>${i.item_name} × ${i.qty}</span>
+        <span>${escapeHtml(i.item_name)} × ${i.qty}</span>
         <span>${riel(i.unit_price * i.qty)}</span>
       </div>
-      ${i.item_note ? `<div class="detail-item-note">📝 ${i.item_note}</div>` : ""}
+      ${i.item_note ? `<div class="detail-item-note">📝 ${escapeHtml(i.item_note)}</div>` : ""}
     </div>`
   ).join("");
 
@@ -484,10 +472,10 @@ async function _fetchOrderDetail(id) {
       ${itemsHtml}
     </div>
     <div class="detail-summary">
-      ${o.address ? `<div class="detail-row"><span>Alamat</span><span>${o.address}</span></div>` : ""}
+      ${o.address ? `<div class="detail-row"><span>Alamat</span><span>${escapeHtml(o.address)}</span></div>` : ""}
       <div class="detail-row detail-total"><span>Total</span><span>${riel(o.total)}</span></div>
       ${payHtml}
-      ${o.note ? `<div class="detail-note">📝 ${o.note}</div>` : ""}
+      ${o.note ? `<div class="detail-note">📝 ${escapeHtml(o.note)}</div>` : ""}
     </div>
     ${changeMethodHtml}
     ${cancelHtml}`;

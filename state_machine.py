@@ -37,11 +37,6 @@ def customer_can_cancel(status: str, payment_status: str) -> bool:
     return status == "Diterima"
 
 
-def admin_can_force_cancel(status: str, payment_status: str) -> bool:
-    """Admin boleh force-cancel dari kolom manapun, kapan aja."""
-    return True
-
-
 def get_cancel_warning(payment_status: str) -> str | None:
     """Warning informational (bukan blocker) kalau order sudah PAID."""
     if payment_status == "PAID":
@@ -138,7 +133,6 @@ def set_admin_msg_id(order_id: int, message_id: int) -> None:
         conn.execute(
             "UPDATE orders SET admin_msg_id=? WHERE id=?", (message_id, order_id)
         )
-        conn.commit()
 
 
 def add_payment_proof(order_id: int, file_id: str) -> None:
@@ -147,7 +141,6 @@ def add_payment_proof(order_id: int, file_id: str) -> None:
             "INSERT INTO payment_proofs (order_id, file_id) VALUES (?, ?)",
             (order_id, file_id),
         )
-        conn.commit()
 
 
 # ── Transisi ──────────────────────────────────────────────────────────────────
@@ -184,7 +177,6 @@ def transition(order_id: int, new_status: str, actor: str = "owner") -> dict:
                    status_changed_at=datetime('now') WHERE id=?""",
             (new_status, order_id),
         )
-        conn.commit()
 
     return {"ok": True, "status": new_status, "label": STATUS_LABEL[new_status]}
 
@@ -210,7 +202,6 @@ def force_cancel_order(order_id: int, reason: str) -> dict:
                    WHERE id=?""",
             (reason, order_id),
         )
-        conn.commit()
 
     return {
         "ok": True,
@@ -246,7 +237,6 @@ def mark_paid(order_id: int, paid_currency: str = "RIEL") -> dict:
                WHERE id=?""",
             (paid_currency.upper(), order_id),
         )
-        conn.commit()
 
     return {"ok": True, "total": row["total"]}
 
@@ -276,7 +266,6 @@ def change_payment_method(order_id: int, new_method: str) -> dict:
             "UPDATE orders SET payment_method=?, updated_at=datetime('now') WHERE id=?",
             (new_method, order_id),
         )
-        conn.commit()
 
     return {"ok": True, "old_method": old_method, "new_method": new_method}
 
@@ -297,7 +286,6 @@ def auto_pay_if_free(order_id: int) -> bool:
                    WHERE id=?""",
                 (order_id,),
             )
-            conn.commit()
             return True
     return False
 
