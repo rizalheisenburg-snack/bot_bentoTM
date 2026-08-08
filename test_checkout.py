@@ -147,6 +147,30 @@ def test_checkout_skips_min_order_check_when_address_blank(fake_user, seeded_men
     )
     assert result["ok"]
 
+def test_checkout_stores_address_as_own_field_not_in_note(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 2, "qty": 3}],
+        note="tolong extra pedas",
+        payment_method="CASH",
+        address="The Rich",
+    )
+    assert result["ok"]
+    order = get_order(result["order_id"])
+    assert order["address"] == "The Rich"
+    assert order["note"] == "tolong extra pedas"
+
+def test_checkout_address_blank_stores_none(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 1, "qty": 1}],
+        note="test",
+        payment_method="CASH",
+    )
+    assert result["ok"]
+    order = get_order(result["order_id"])
+    assert order["address"] is None
+
 def test_checkout_drops_unavailable_items_and_still_accepts_order(fake_user, seeded_menu):
     with get_conn() as conn:
         conn.execute("UPDATE menu_items SET available=0 WHERE id=2")

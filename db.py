@@ -73,6 +73,8 @@ def init_db() -> None:
             conn.execute(
                 "UPDATE orders SET status_changed_at = created_at WHERE status_changed_at IS NULL"
             )
+        if "address" not in cols:
+            conn.execute("ALTER TABLE orders ADD COLUMN address TEXT")
         conn.execute(
             "UPDATE orders SET payment_method='ABA' WHERE note LIKE '[Transfer ABA]%'"
         )

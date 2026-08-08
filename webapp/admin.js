@@ -181,6 +181,7 @@ function renderDetail() {
 
   document.getElementById("detail-body").innerHTML = `
     <div class="detail-row"><span>Customer</span><span>${escapeHtml(o.full_name || o.username || o.user_id)}</span></div>
+    ${o.address ? `<div class="detail-row"><span>Alamat</span><span>${escapeHtml(o.address)}</span></div>` : ""}
     <div class="detail-row"><span>Metode Bayar</span><span>${methodLabel}</span></div>
     ${payHtml}
     ${reasonHtml}

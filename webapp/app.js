@@ -329,10 +329,8 @@ async function doCheckout(payMethod, onSuccess = showSuccess) {
   const items = Object.values(cart).map(({ item, qty, note }) => ({
     item_id: item.id, qty, note: (note || "").trim(),
   }));
-  const noteBase = document.getElementById("note-input").value.trim();
+  const note = document.getElementById("note-input").value.trim();
   const addr = document.getElementById("addr-custom").value.trim() || selectedAddr;
-  const noteWithAddr = `[${addr}] ${noteBase}`.trim();
-  const note = payMethod === "ABA" ? `[Transfer ABA] ${noteWithAddr}` : noteWithAddr;
 
   const result = await api("/api/checkout", {
     method: "POST",
@@ -486,6 +484,7 @@ async function _fetchOrderDetail(id) {
       ${itemsHtml}
     </div>
     <div class="detail-summary">
+      ${o.address ? `<div class="detail-row"><span>Alamat</span><span>${o.address}</span></div>` : ""}
       <div class="detail-row detail-total"><span>Total</span><span>${riel(o.total)}</span></div>
       ${payHtml}
       ${o.note ? `<div class="detail-note">📝 ${o.note}</div>` : ""}

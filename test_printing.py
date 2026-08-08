@@ -92,6 +92,20 @@ def test_create_print_job_missing_order_returns_none():
     assert create_print_job(9999) is None
 
 
+def test_create_print_job_includes_address_as_own_field(fake_user, seeded_menu):
+    result = checkout(
+        user=fake_user,
+        items=[{"item_id": 2, "qty": 2}],  # 30000, di atas tier default (20000)
+        note="test order",
+        payment_method="CASH",
+        address="The Rich",
+    )
+    assert result["ok"]
+    job = create_print_job(result["order_id"])
+    assert job["payload"]["address"] == "The Rich"
+    assert "The Rich" not in job["payload"]["note"]
+
+
 def test_pending_job_is_resendable(fake_user, seeded_menu):
     order_id = _make_order(fake_user)
     create_print_job(order_id)

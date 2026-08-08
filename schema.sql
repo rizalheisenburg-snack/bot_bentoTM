@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS orders (
     -- discount       INTEGER GENERATED ALWAYS AS (voucher_value) STORED,
     total          INTEGER GENERATED ALWAYS AS (subtotal) STORED,
 
+    address        TEXT,                               -- alamat tujuan dari address picker di cart, field sendiri (bukan dicampur ke note)
     note           TEXT,
     cancel_reason  TEXT,                               -- alasan force-cancel admin (Stok habis/Request customer/Kesalahan input/Lainnya)
     admin_msg_id   INTEGER,                            -- message_id kartu order di chat admin

@@ -104,8 +104,8 @@ def checkout(
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO orders
-               (user_id, username, full_name, status, subtotal, note, payment_method)
-               VALUES (?,?,?,?,?,?,?)""",
+               (user_id, username, full_name, status, subtotal, note, payment_method, address)
+               VALUES (?,?,?,?,?,?,?,?)""",
             (
                 user_id,
                 username,
@@ -114,6 +114,7 @@ def checkout(
                 subtotal,
                 note,
                 payment_method,
+                address or None,
             ),
         )
         order_id = cur.lastrowid

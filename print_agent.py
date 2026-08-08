@@ -64,6 +64,8 @@ def _print_receipt(receipt: dict) -> None:
 
         p.set(align="left")
         p.text(f"Pelanggan : {receipt.get('customer', '-')}\n")
+        if receipt.get("address"):
+            p.text(f"Alamat    : {receipt['address']}\n")
         p.text(f"Bayar     : {receipt.get('payment_method', 'CASH')}\n")
         if receipt.get("note"):
             p.text(f"Note      : {receipt['note']}\n")

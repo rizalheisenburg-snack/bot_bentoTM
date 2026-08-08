@@ -83,6 +83,7 @@ def _order_text(o: dict, *, for_admin: bool = True) -> str:
     items_text = "\n".join(_item_line(i) for i in o.get("items", []))
     pay_status = "✅ LUNAS" if o["payment_status"] == "PAID" else "❌ BELUM BAYAR"
     paid_info = f" ({o['paid_currency']})" if o.get("paid_currency") else ""
+    address_line = f"📍 Alamat  : {o['address']}\n" if o.get("address") else ""
     note_line = f"📝 Note    : {o.get('note') or '-'}\n\n"
     payment_method_line = ""
     if for_admin:
@@ -94,6 +95,7 @@ def _order_text(o: dict, *, for_admin: bool = True) -> str:
     return (
         f"🧾 *Order #{o['id']}*\n"
         f"👤 {o.get('full_name') or o.get('username') or o['user_id']}\n"
+        f"{address_line}"
         f"📋 Status  : {STATUS_LABEL.get(o['status'], o['status'])}\n"
         f"💳 Bayar   : {pay_status}{paid_info}\n"
         f"{payment_method_line}"

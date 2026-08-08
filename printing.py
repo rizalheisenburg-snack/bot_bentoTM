@@ -12,6 +12,7 @@ def _build_receipt(order: dict) -> dict:
         "created_at": order["created_at"],
         "customer": order.get("full_name") or order.get("username") or str(order["user_id"]),
         "payment_method": order.get("payment_method") or "CASH",
+        "address": order.get("address") or "",
         "note": order.get("note") or "",
         "items": [
             {
