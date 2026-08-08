@@ -53,26 +53,20 @@ def _print_receipt(receipt: dict) -> None:
     """Format & cetak 1 struk, lalu potong kertas. Blocking (I/O USB) — sengaja
     dipanggil lewat asyncio.to_thread supaya gak nge-block event loop. Raise
     kalau ada error printer (offline/gak kedetect/dll), ditangkap di caller."""
-    # Catatan: p.set(...) di python-escpos gak incremental — tiap dipanggil,
-    # parameter yang gak disebutin balik ke default (align kiri, bold mati,
-    # width/height 1). Makanya tiap pemanggilan di bawah sengaja nyebutin
-    # SEMUA parameter yang relevan, biar gak ke-reset gak sengaja.
+    # Catatan: printer ini kebukti nge-ignore command bold/width/height dari
+    # python-escpos (align doang yang keefek) — jadi sengaja gak dipaksain
+    # lagi, semua dicetak ukuran/berat normal. p.set(...) sendiri tetap gak
+    # incremental (tiap dipanggil, param yang gak disebutin balik ke default),
+    # makanya align di-set ulang tiap ganti sisi.
     p = _open_printer()
     try:
-        # Nama warung — dibikin lebih gede (height 3x) tapi width tetap 2x
-        # (bukan naik lagi) biar teksnya gak wrap di kertas 80mm.
-        p.set(align="center", bold=True, width=2, height=3)
+        p.set(align="center")
         p.text("BENTO X JAGO MASAK\n")
-
-        # Nomor order — bold + 2x tinggi biar jadi fokus utama di bawah nama warung.
-        p.set(align="center", bold=True, width=1, height=2)
         p.text(f"Order #{receipt.get('order_id', '-')}\n")
-
-        p.set(align="center", bold=False, width=1, height=1)
         p.text(f"{receipt.get('created_at', '')}\n")
         p.text("-" * 32 + "\n")
 
-        p.set(align="left", bold=False, width=1, height=1)
+        p.set(align="left")
         p.text(f"Pelanggan : {receipt.get('customer', '-')}\n")
         if receipt.get("address"):
             p.text(f"Alamat    : {receipt['address']}\n")
@@ -81,20 +75,19 @@ def _print_receipt(receipt: dict) -> None:
             p.text(f"Note      : {receipt['note']}\n")
         p.text("-" * 32 + "\n")
 
-        for item in receipt.get("items", []):
-            p.set(align="left", bold=True, width=1, height=1)
-            p.text(f"{item['name']} x{item['qty']}\n")
+        for i, item in enumerate(receipt.get("items", []), start=1):
+            p.set(align="left")
+            p.text(f"{i}. {item['name']} x{item['qty']}\n")
             if item.get("note"):
-                p.set(align="left", bold=False, width=1, height=1)
-                p.text(f"  * {item['note']}\n")
-            p.set(align="right", bold=False, width=1, height=1)
+                p.text(f"   * {item['note']}\n")
+            p.set(align="right")
             p.text(f"{item['line_total']:,}\n")
 
-        p.set(align="left", bold=False, width=1, height=1)
+        p.set(align="left")
         p.text("-" * 32 + "\n")
-        p.set(align="right", bold=True, width=2, height=2)
+        p.set(align="right")
         p.text(f"TOTAL {receipt.get('total', 0):,}\n")
-        p.set(align="left", bold=False, width=1, height=1)
+        p.set(align="left")
         p.text("\n\n")
         p.cut()
     finally:
