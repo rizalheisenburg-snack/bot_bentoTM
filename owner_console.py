@@ -167,6 +167,18 @@ async def _is_owner(update: Update) -> bool:
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _is_owner(update):
+        # Kalau customer baru pertama kali /start SETELAH checkout Express (mis. pesan
+        # minta lokasi tadinya gagal terkirim karena dia belum pernah start bot), langsung
+        # ingetin soal itu duluan, bukan pesan generik cek-minimal-order.
+        pending_express = get_pending_express_location_order(update.effective_user.id)
+        if pending_express:
+            await update.message.reply_text(
+                f"🚀 Order #{pending_express['id']} kamu pakai *Kurir Express* dan masih nunggu "
+                "*Share Location*. Tap tombol di bawah ya 🙏",
+                parse_mode="Markdown",
+                reply_markup=_location_keyboard(),
+            )
+            return
         await update.message.reply_text(
             "👋 Halo! Buat cek minimal order ke lokasi kamu, share lokasi dulu ya lewat tombol di bawah.",
             reply_markup=_location_keyboard(),

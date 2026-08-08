@@ -23,4 +23,4 @@ EXPRESS_REMINDER_CHECK_INTERVAL_SECONDS: int = int(os.getenv("EXPRESS_REMINDER_C
 
 from pathlib import Path
 BASE_DIR = Path(__file__).parent
-ABA_QR_IMAGE_PATH: str = str(BASE_DIR / "webapp" / "aba-mat-baru.jpg")
+ABA_QR_IMAGE_PATH: str = str(BASE_DIR / "webapp" / "img" / "aba_koh_james.jpg")
