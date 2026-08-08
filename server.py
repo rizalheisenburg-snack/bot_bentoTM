@@ -1,18 +1,26 @@
 """HTTP server — aiohttp. Melayani API + static webapp."""
 from __future__ import annotations
+import hmac
 import json
 import logging
 import pathlib
 
 log = logging.getLogger(__name__)
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 from telegram.error import Forbidden
 
 from checkout_flow import checkout, verify_init_data
-from config import BOT_USERNAME, OWNER_ID
+from config import BOT_USERNAME, OWNER_ID, PRINTER_AGENT_TOKEN
 from db import get_conn, get_setting
 from geo import ADDRESS_MIN_ORDER, DEFAULT_ADDRESS_MIN_ORDER
+from printing import (
+    create_print_job,
+    get_resendable_print_jobs,
+    mark_job_failed,
+    mark_job_printed,
+    mark_job_sent,
+)
 from state_machine import (
     change_payment_method,
     force_cancel_order,
@@ -90,6 +98,7 @@ async def api_checkout(request):
         if result.get("ok"):
             await _notify_owner_new_order(request, result.get("order_id"))
             await broadcast_order_update(result.get("order_id"))
+            await push_print_job(result.get("order_id"))
         # Kirim mirror ke pelanggan untuk semua order sukses yang bukan auto-paid
         if result.get("ok") and not result.get("auto_paid"):
             mirror_sent = await _send_order_mirror_to_user(request, result.get("order_id"))
@@ -343,6 +352,104 @@ async def broadcast_order_update(order_id: int | None):
         except Exception:
             dead.add(ws)
     _ws_clients.difference_update(dead)
+
+
+# ── Realtime (WebSocket print-agent) ───────────────────────────────────────────
+# Print-agent jalan di PC lokal (nyolok printer USB) dan connect OUT ke sini
+# lewat WebSocket, supaya gak kena masalah NAT/firewall jaringan lokal si PC.
+
+_printer_agent: web.WebSocketResponse | None = None
+
+
+def _auth_printer_ws(request: web.Request) -> bool:
+    """Print-agent bukan user Telegram, jadi auth pakai token statis (.env),
+    bukan initData, dikirim lewat query string sama seperti /ws/admin."""
+    token = request.query.get("token", "")
+    if not PRINTER_AGENT_TOKEN or not token:
+        return False
+    return hmac.compare_digest(token, PRINTER_AGENT_TOKEN)
+
+
+@routes.get("/ws/printer")
+async def ws_printer(request):
+    global _printer_agent
+    if not _auth_printer_ws(request):
+        return _json({"ok": False, "error": "Forbidden"}, 403)
+
+    # Cuma boleh 1 agent aktif dalam satu waktu — socket lama ditutup dulu
+    # supaya print job gak pernah kekirim ke 2 koneksi sekaligus (cetak dobel).
+    if _printer_agent is not None:
+        await _printer_agent.close()
+
+    ws = web.WebSocketResponse(heartbeat=30)
+    await ws.prepare(request)
+    _printer_agent = ws
+    log.info("print-agent terhubung")
+    try:
+        await _flush_pending_print_jobs(ws)
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                await _handle_printer_ack(msg.data)
+    finally:
+        if _printer_agent is ws:
+            _printer_agent = None
+        log.info("print-agent terputus")
+    return ws
+
+
+async def _handle_printer_ack(raw: str):
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    if data.get("type") != "ack":
+        return
+    job_id = data.get("job_id")
+    if not job_id:
+        return
+    if data.get("status") == "printed":
+        mark_job_printed(job_id)
+    else:
+        mark_job_failed(job_id, data.get("error", "unknown error"))
+
+
+async def _send_print_job(ws: web.WebSocketResponse, job: dict) -> None:
+    payload = json.dumps(
+        {
+            "type": "print_job",
+            "job_id": job["id"],
+            "order_id": job["order_id"],
+            "receipt": job["payload"],
+        },
+        ensure_ascii=False,
+    )
+    try:
+        await ws.send_str(payload)
+    except Exception:
+        # Job tetap di status semula (pending/failed) — otomatis ke-resend
+        # pas agent reconnect berikutnya, gak perlu ditangani manual di sini.
+        log.exception("gagal push print job #%s ke agent", job["id"])
+        return
+    mark_job_sent(job["id"])
+
+
+async def _flush_pending_print_jobs(ws: web.WebSocketResponse) -> None:
+    for job in get_resendable_print_jobs():
+        await _send_print_job(ws, job)
+
+
+async def push_print_job(order_id: int | None) -> None:
+    """Bikin print job dari order baru. Kalau print-agent lagi connect langsung
+    push, kalau enggak job cukup nongkrong di DB ('pending') dan otomatis
+    ke-resend pas agent reconnect (lihat _flush_pending_print_jobs)."""
+    if not order_id:
+        return
+    try:
+        job = create_print_job(order_id)
+        if job and _printer_agent is not None:
+            await _send_print_job(_printer_agent, job)
+    except Exception:
+        log.exception("gagal bikin/push print job buat order #%s", order_id)
 
 
 # ── Owner ─────────────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ CAFE_LON: float = float(os.getenv("CAFE_LON", "103.52617840379959"))
 WEBAPP_URL: str = os.getenv("WEBAPP_URL", "http://localhost:8082")
 PORT: int = int(os.getenv("PORT", "8080"))
 SECRET_KEY: str = os.getenv("SECRET_KEY", BOT_TOKEN)
+PRINTER_AGENT_TOKEN: str = os.getenv("PRINTER_AGENT_TOKEN", "")
 
 from pathlib import Path
 BASE_DIR = Path(__file__).parent

@@ -70,3 +70,15 @@ CREATE TABLE IF NOT EXISTS payment_proofs (
     submitted_at TEXT DEFAULT (datetime('now')),       -- UTC
     FOREIGN KEY (order_id) REFERENCES orders(id)
 );
+
+CREATE TABLE IF NOT EXISTS print_jobs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id   INTEGER NOT NULL,
+    payload    TEXT    NOT NULL,                       -- JSON snapshot struk (item, qty, harga, total, dll)
+    status     TEXT    NOT NULL DEFAULT 'pending',      -- pending | sent | printed | failed
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    error      TEXT,
+    created_at TEXT DEFAULT (datetime('now')),          -- UTC
+    updated_at TEXT DEFAULT (datetime('now')),          -- UTC
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);

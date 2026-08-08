@@ -1,0 +1,11 @@
+# Requirements untuk print_agent.py — jalan di PC lokal yang nyolok printer
+# USB, terpisah dari requirements.txt utama karena biasanya beda mesin dari VPS.
+
+# WebSocket client ke server
+aiohttp==3.*
+python-dotenv==1.*
+
+# Printer thermal USB (APOS-P80A-BW / ESC-POS)
+pyusb
+python-escpos
+libusb
