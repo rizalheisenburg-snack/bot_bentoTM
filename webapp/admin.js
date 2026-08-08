@@ -76,8 +76,11 @@ function renderBoard() {
 }
 
 function chatLinkFor(o) {
-  if (o.user_id) return `tg://user?id=${o.user_id}`;
+  // username diutamakan: link t.me bisa dibuka reliable via openTelegramLink().
+  // tg://user?id= cuma fallback last-resort — cuma jalan kalau akun admin udah
+  // pernah "kenal" (resolve) user itu, jadi seringnya diam aja buat customer baru.
   if (o.username) return `https://t.me/${o.username}`;
+  if (o.user_id) return `tg://user?id=${o.user_id}`;
   return null;
 }
 
@@ -110,7 +113,11 @@ document.getElementById("board").addEventListener("click", e => {
   const chatBtn = e.target.closest(".btn-chat");
   if (chatBtn) {
     if (!chatBtn.disabled && chatBtn.dataset.link) {
-      window.open(chatBtn.dataset.link, "_blank");
+      const link = chatBtn.dataset.link;
+      // Di dalam Mini App, window.open ke t.me/tg:// gampang di-block WebView-nya.
+      // openTelegramLink() adalah cara resmi Telegram buat lompat ke chat lain.
+      if (tg && link.startsWith("https://t.me/")) tg.openTelegramLink(link);
+      else window.open(link, "_blank");
     }
     return; // baik enabled maupun disabled, jangan lanjut ke openDetail
   }
