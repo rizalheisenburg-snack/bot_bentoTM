@@ -40,13 +40,27 @@ html, body {
 }
 
 /* ── Screens ──────────────────────────────────────────────────── */
+/* App ini dirancang mobile-first (lebar HP). Di browser desktop yang lebar,
+   dibatasi max-width & di-center supaya tetap proporsional kayak di HP,
+   bukan melar full lebar layar — max-width ini no-op di HP asli (viewport
+   udah lebih sempit dari 480px duluan). */
 .screen {
   display: none;
   flex-direction: column;
   height: 100dvh;
   overflow: hidden;
+  max-width: 480px;
+  margin: 0 auto;
 }
 .screen.active { display: flex; }
+
+@media (min-width: 481px) {
+  .screen.active {
+    box-shadow: 0 0 60px rgba(0, 0, 0, .5);
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+  }
+}
 
 /* ── Loading ──────────────────────────────────────────────────── */
 #loading {
@@ -295,7 +309,13 @@ html, body {
 .cart-fab {
   position: fixed;
   bottom: calc(16px + env(safe-area-inset-bottom));
-  left: 16px; right: 16px;
+  /* position:fixed selalu relatif ke viewport, bukan ke panel .screen yang
+     di-center — jadi di-center manual di sini juga, biar sejajar sama panel
+     app-nya, bukan melebar/nempel ke tepi browser di layar desktop lebar. */
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 448px;
   background: rgba(29, 33, 44, .88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -310,7 +330,7 @@ html, body {
   transition: transform .15s;
   z-index: 20;
 }
-.cart-fab:active { transform: scale(.97); }
+.cart-fab:active { transform: translateX(-50%) scale(.97); }
 .cart-fab.hidden { display: none; }
 .cart-total-fab { font-size: 14.5px; font-weight: 800; color: var(--blue2); }
 
