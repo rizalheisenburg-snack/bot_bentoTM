@@ -27,6 +27,7 @@ Sistem kasir & pemesanan digital untuk warung makan **Bento x Jago Masak** ("War
 - **Payment terpisah dari status dapur** — `payment_status` (UNPAID/PAID) berjalan independen dari status masak; ganti metode bayar (CASH ↔ ABA) bisa dilakukan customer sendiri lewat Mini App selama order belum lunas
 - **Minimal order berbasis alamat** — tier minimal order ditentukan dari alamat yang dipilih customer di cart (bukan GPS), divalidasi server-side saat checkout
 - **Kanban Admin (`/admin`)** — board real-time via WebSocket, 5 kolom status, timer highlight untuk order yang nyangkut, badge status bayar, dibuka langsung dari command bot sebagai Mini App
+- **Cetak Struk Otomatis** — order baru langsung dicetak ke printer thermal USB lewat print-agent lokal (`print_agent.py`) yang connect ke server via WebSocket (`/ws/printer`); kalau agent lagi offline, print job diantre di database dan otomatis dicetak begitu agent reconnect
 - **Order Mirror ke Customer** — begitu checkout sukses, detail order otomatis dikirim ke chat customer; kalau customer belum pernah `/start` bot, sistem mendeteksi dan mengarahkan customer untuk chat bot dulu (bukan silent fail)
 - **Chat Pelanggan dari Kanban** — tombol deep-link langsung ke chat Telegram customer di setiap card order, tanpa perlu keluar dari panel admin
 - **Dual-path admin actions** — perubahan status/lunas/cancel sengaja tersedia di **dua tempat**: Kanban (TMA) *dan* chat bot (inline button), supaya operasional owner tetap jalan walau salah satu sisi bermasalah
@@ -52,7 +53,7 @@ Sistem kasir & pemesanan digital untuk warung makan **Bento x Jago Masak** ("War
 - **Semua uang dalam Riel (integer)** — base currency Riel Kamboja, tanpa subunit, jadi tidak ada masalah pembulatan desimal. USD dikonversi pakai rate statis 4000/$1 hanya untuk pembayaran fisik, pembukuan tetap Riel.
 - **Payment tidak menghambat dapur** — order tetap diproses walau belum dibayar; risiko customer tidak bayar ditanggung sebagai risiko bisnis, bukan dijaga lewat kode.
 - **Voucher tidak dipakai** — fitur voucher dari base project `pos-babi` sengaja dihapus total.
-- **Struk printer thermal** — sengaja ditunda sampai lolos masa trial dengan owner.
+- **Struk printer thermal otomatis** — order baru langsung dicetak lewat print-agent lokal (`print_agent.py`) yang connect ke server via WebSocket, bukan RawBT seperti rencana awal. Detail di [`ROADMAP.md`](./ROADMAP.md).
 
 Detail lengkap keputusan & histori pengembangan ada di [`ROADMAP.md`](./ROADMAP.md).
 
@@ -71,11 +72,13 @@ bot_bentoTM/
 ├── geo.py               # Minimal order per-alamat
 ├── seed_menu.py         # Seed data menu awal
 ├── config.py            # Environment/config
+├── printing.py          # Antrean print job (SQLite queue) + format data struk
+├── print_agent.py       # Script terpisah — jalan di PC dengan printer USB, requirements-print-agent.txt sendiri
 ├── webapp/
 │   ├── index.html, app.js, style.css     # Mini App customer-facing
 │   ├── admin.html, admin.js, admin.css   # Kanban admin
 │   └── img/                              # Foto menu
-├── test_checkout.py, test_geo.py         # Unit test
+├── test_checkout.py, test_geo.py, test_printing.py   # Unit test
 └── ROADMAP.md            # Histori & keputusan pengembangan
 ```
 

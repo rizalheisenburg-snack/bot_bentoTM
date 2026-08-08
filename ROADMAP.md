@@ -38,8 +38,7 @@
 ### 1.1 Catatan Custom per Item — ✅ Done
 
 - Kolom `item_note` di `order_items`, diinput per item di cart (`webapp/app.js`), disimpan verbatim (gak diparsing).
-- Tampil di kartu order (bot chat) dan detail order (Kanban + TMA customer).
-- **Belum:** cetak struk fisik (lihat item terpisah di bawah — sengaja ditunda).
+- Tampil di kartu order (bot chat), detail order (Kanban + TMA customer), dan struk cetak (lihat bagian 1.7).
 
 ### 1.2 Minimal Order per Alamat — ✅ Done *(desain final beda dari rencana awal)*
 
@@ -79,6 +78,22 @@
 - Regex (`antar`, `delivery`, `bisa ke`, `sampe mana`) → arahkan ke tombol lokasi, bukan dijawab manual.
 - File: `owner_console.py` (`_LOCATION_KEYWORD_RE`, `handle_text_fallback`).
 
+### 1.7 Cetak Struk Otomatis — ✅ Done *(desain final beda total dari rencana awal — bukan RawBT)*
+
+- **Bukan RawBT (Android)** kayak rencana awal — pindah ke arsitektur **print-agent lokal** (`print_agent.py`, Python) yang jalan di PC yang nyolok printer thermal USB (APOS-P80A-BW, via `pyusb` + `python-escpos` + `libusb`).
+- Print-agent **connect OUT** ke server lewat WebSocket baru (`/ws/printer`), bukan sebaliknya — sengaja dibikin gitu supaya gak kena masalah NAT/firewall jaringan lokal si PC. Auth pakai token statis (`PRINTER_AGENT_TOKEN`), auto-reconnect kalau putus.
+- Order baru otomatis bikin "print job" dan langsung dipush ke agent yang lagi connect. Kalau gak ada agent connect, job diantre di tabel SQLite baru `print_jobs` (status `pending/sent/printed/failed`) dan otomatis di-resend pas agent reconnect — didesain supaya gak dobel cetak (job yang udah `sent` gak di-resend ulang, cuma yang `pending`/`failed`).
+- **Ketemu keterbatasan hardware pas testing langsung ke printer:** printer/driver-nya ternyata nge-ignore command bold & ukuran font (GS!/ESC E) dari `python-escpos` — cuma alignment (kiri/kanan/tengah) yang beneran keefek. Jadi struk dicetak plain text semua, dikasih nomor urut per item (`1. `, `2. `, dst) sebagai gantinya biar tetap gampang di-scan.
+- File: `printing.py` (job queue + format data struk), `print_agent.py` (script terpisah, `requirements-print-agent.txt` sendiri karena beda mesin dari server), `server.py` (route `/ws/printer`), `schema.sql` (`print_jobs`).
+- **Insiden kecil:** file config print-agent (`.env.printagent`) sempet ke-*commit* gak sengaja ke repo GitHub yang public (pattern lama di `.gitignore` cuma nge-cover `.env` persis, bukan `.env.printagent`) — token langsung di-rotate begitu ketauan, `.gitignore` diperbaiki jadi `.env.*` biar gak kejadian lagi ke file config sejenis manapun.
+
+### 1.8 Alamat Jadi Field Sendiri — ✅ Done
+
+- Sebelumnya alamat tujuan (KD/Hp Tower/WON/The Rich/dll) di-embed sebagai prefix teks ke kolom `note` (misal `[The Rich] [Transfer ABA] ...`) karena tabel `orders` gak punya kolom alamat sendiri — ketauan pas struk mulai dicetak dan Note-nya jadi berantakan campur alamat+tag ABA+catatan asli.
+- Sekarang `orders.address` jadi kolom sendiri, ditampilin terpisah di semua tempat: kartu chat bot (admin & customer), Kanban admin, detail order customer, dan struk cetak. Prefix `[Transfer ABA]` di note juga dibuang (udah kecatet rapi di kolom `payment_method`, jadi redundan).
+- Order lama (sebelum perubahan ini) sengaja **gak di-backfill** — note lama tetap apa adanya, gak di-parse otomatis (risiko salah pecah alamat custom yang free-text lebih besar daripada manfaatnya).
+- File: `schema.sql`, `db.py`, `checkout_flow.py`, `webapp/app.js`, `webapp/admin.js`, `owner_console.py`, `printing.py`.
+
 ---
 
 ## Fase 2 — UI Redesign
@@ -90,6 +105,8 @@
 - ✅ Foto per item menu (kolom `image_url`), ~29 dari 75 item udah ada foto, sisanya nyusul.
 - ✅ Optimasi gambar (resize + compress) — total ukuran turun dari puluhan MB ke ~1MB.
 - ✅ Kanban admin diredesign: tab status, kode warna kolom, badge, animasi order baru.
+- ✅ Tombol "+ Tambah Menu Lagi" di halaman keranjang — baris sendiri di antara list item dan kotak checkout (Tujuan/Note/Total/Bayar), biar customer gampang balik milih menu lagi tanpa nyari tombol back kecil.
+- ✅ Fix kotak checkout (`cart-footer`) kepepet/sempit pas keyboard muncul (nulis note/alamat custom) — dikasih `overflow-y: auto` biar bisa scroll sendiri, gak numpuk sama field lain.
 - 🟨 Sisa foto menu (~46 item, mostly Roti/Cemilan) masih nyusul manual.
 
 ---
@@ -102,6 +119,9 @@
 | Minimal order berbasis alamat cart, bukan GPS | Lokasi customer realistisnya dari daftar dorm/hotel yang udah dikenal, bukan koordinat acak |
 | Command `/admin` di bot buka Kanban sebagai Mini App | Biar gak perlu ketik URL manual, tetep dalam Telegram |
 | Validasi minimal order pindah ke server-side | Sebelumnya cuma warning UI di frontend, bisa di-bypass |
+| Cetak struk: print-agent lokal (WebSocket), bukan RawBT | RawBT (Android) butuh HP nyala terus; print-agent Python lebih gampang di-otomatisasi & di-monitor di PC kasir |
+| Struk plain text, gak ada bold/font gede | Printer/driver fisik ternyata gak support command bold/ukuran font ESC-POS dari `python-escpos` |
+| Alamat jadi kolom `orders.address` sendiri | Sebelumnya di-embed jadi prefix teks di `note`, jadi berantakan begitu ditampilin di struk cetak |
 
 ---
 
@@ -116,7 +136,7 @@
 | Aksi ubah state (status, lunas, force-cancel) | **Sengaja ada di 2 tempat**: Kanban (TMA) **dan** chat bot (inline button) — bukan cuma satu. Alasan: Kanban masih dianggap belum 100% reliable, chat bot jadi fallback operasional biar gak ada downtime kalau Kanban error |
 | Upload bukti transfer | Tetap lewat chat, tidak dipindah ke TMA |
 | Share lokasi GPS | Tetap ada di bot (informasional), tapi gak dipakai buat hitung minimal order lagi |
-| Struk printer thermal (RawBT) | **Sengaja ditunda** — langkah lanjutan setelah lolos trial sama Koh James, bukan bug/kelupaan |
+| Struk printer thermal | ✅ **Sudah live** sejak 8 Agustus 2026 — pakai print-agent lokal (bukan RawBT seperti rencana awal). Detail di bagian 1.7 |
 
 ---
 
@@ -124,8 +144,9 @@
 
 | Item | Status | Keterangan |
 | --- | --- | --- |
-| Cetak struk thermal (RawBT) | 🟥 Blocked (sengaja) | Nunggu lolos trial dulu |
 | Sisa foto menu (~46 item) | 🟨 In progress | Upload manual bertahap |
+| Backfill alamat di order lama | ⬜ Belum mulai (sengaja) | Order sebelum 8 Agustus 2026 masih nyimpen alamat sebagai prefix teks di `note`, gak di-parse otomatis — risiko salah pecah alamat custom |
+| Print-agent auto-start/monitoring di PC kasir | ⬜ Belum mulai | Sekarang masih dijalanin manual (`python print_agent.py`); belum di-setup jadi Windows service/Task Scheduler biar auto-restart kalau PC reboot atau proses crash |
 
 ---
 
@@ -135,4 +156,5 @@
 | --- | --- |
 | 7 Agustus 2026 | Live — sistem mulai dipakai |
 | 7 Agustus – +2 minggu | Masa trial: sistem jalan real, admin ditraining sambil jalan |
-| Setelah masa trial | Evaluasi bareng Koh James — lanjut/ada revisi, termasuk keputusan soal struk printer |
+| 8 Agustus 2026 | Cetak struk otomatis (print-agent) live + alamat jadi field sendiri + polish UI keranjang |
+| Setelah masa trial | Evaluasi bareng Koh James — lanjut/ada revisi |
