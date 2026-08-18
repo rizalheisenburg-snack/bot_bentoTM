@@ -31,6 +31,7 @@ from geo import get_min_order, haversine
 from state_machine import (
     CANCEL_REASONS,
     STATUS_LABEL,
+    TERMINAL,
     TRANSITIONS,
     add_payment_proof,
     force_cancel_order,
@@ -136,8 +137,9 @@ def _order_keyboard(order_id: int, status: str, payment_status: str) -> InlineKe
 
         ])
 
-    # Tombol force-cancel: selalu tampil dari kolom manapun (kecuali sudah Dibatalkan)
-    if status != "Dibatalkan":
+    # Tombol force-cancel: tampil dari kolom manapun SELAIN status terminal
+    # (Selesai/Dibatalkan) — backend juga nolak final di force_cancel_order().
+    if status not in TERMINAL:
         rows.append([
             InlineKeyboardButton("🚫 Force Cancel", callback_data=f"forcecancel:{order_id}")
         ])
@@ -263,6 +265,9 @@ async def cmd_omzet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         tahun = int(args[1]) if len(args or []) > 1 else now.year
     except ValueError:
         await update.message.reply_text("Cara Pakai: /omzet [bulan] [tahun]\nContoh: /omzet 6 2026")
+        return
+    if not (1 <= bulan <= 12):
+        await update.message.reply_text("Bulan harus 1-12 ya. Contoh: /omzet 6 2026")
         return
 
     d = get_omzet(bulan, tahun)

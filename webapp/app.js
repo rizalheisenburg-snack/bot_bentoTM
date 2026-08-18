@@ -645,6 +645,7 @@ function startEditOrder(order) {
   document.getElementById("cart-footer-normal").classList.add("hidden");
   document.getElementById("pay-method-row").classList.add("hidden");
   document.getElementById("edit-actions-row").classList.remove("hidden");
+  document.getElementById("btn-edit-cancel").disabled = false;
   renderCart();
   show("screen-cart");
 }
@@ -671,7 +672,13 @@ document.getElementById("btn-edit-cancel").addEventListener("click", () => {
 
 document.getElementById("btn-edit-save").addEventListener("click", async () => {
   const btn = document.getElementById("btn-edit-save");
+  const cancelBtn = document.getElementById("btn-edit-cancel");
+  // Cancel dikunci juga selama Simpan pending — kalau Cancel tetap bisa
+  // diklik, exitEditMode() bisa kepanggil 2x (sekali dari Cancel, sekali lagi
+  // dari Simpan yang telat resolve) dan _cartBackup yang udah null di
+  // panggilan kedua bikin cart customer ke-wipe tanpa direstore.
   btn.disabled = true;
+  cancelBtn.disabled = true;
   btn.textContent = "Menyimpan...";
 
   const items = Object.values(cart).map(({ item, qty, note, modifiers, carryOverId }) => {
@@ -696,6 +703,7 @@ document.getElementById("btn-edit-save").addEventListener("click", async () => {
   } else {
     tg?.showAlert?.(result.error || "Gagal menyimpan perubahan.");
     btn.disabled = false;
+    cancelBtn.disabled = false;
     btn.textContent = "💾 Simpan Perubahan";
   }
 });

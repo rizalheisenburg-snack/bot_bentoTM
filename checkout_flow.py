@@ -160,70 +160,83 @@ def checkout(
     if not items:
         return {"ok": False, "error": "Keranjang kosong"}
 
-    # ── Baca menu LIVE dari DB (harga & stok dari server, bukan client) ────────
-    with get_conn() as conn:
-        menu_rows = conn.execute("SELECT * FROM menu_items").fetchall()
-        groups_by_product = _load_modifier_groups_by_product(conn)
-    menu_map = {r["id"]: dict(r) for r in menu_rows}
-
-    valid_items = []
-    unavailable_items = []
-    subtotal = 0
-
-    for entry in items:
-        item_id = int(entry["item_id"])
-        qty = int(entry["qty"])
-        if qty <= 0:
-            continue
-        m = menu_map.get(item_id)
-        if not m:
-            unavailable_items.append({"item_id": item_id, "reason": "tidak ada"})
-            continue
-        if not m["available"]:
-            unavailable_items.append({"item_id": item_id, "item_name": m["name"], "reason": "habis"})
-            continue
-
-        try:
-            modifier_extra, modifier_snapshot = _resolve_modifiers(
-                m["name"], groups_by_product.get(item_id, []), entry.get("modifiers")
-            )
-        except ValueError as e:
-            return {"ok": False, "error": str(e)}
-
-        item_note = (entry.get("note") or "").strip() or None
-        unit_price = m["price"] + modifier_extra
-        modifiers_json = json.dumps(modifier_snapshot, ensure_ascii=False) if modifier_snapshot else None
-        subtotal += unit_price * qty
-        valid_items.append((item_id, m["name"], qty, unit_price, item_note, modifiers_json))
-
-    if not valid_items:
-        return {"ok": False, "error": "Semua item tidak tersedia"}
-
-    min_order = get_min_order_by_address(address) if address else 0
-    if subtotal > 0 and subtotal < min_order:
-        return {
-            "ok": False,
-            "error": f"Order minimal {min_order:,}៛ untuk tujuan '{address}' — kurang {min_order - subtotal:,}៛ lagi.",
-        }
-
-    # Voucher support is disabled; only Cash and ABA are accepted.
-    if payment_method == "VOUCHER":
-        return {
-            "ok": False,
-            "error": "Metode VOUCHER tidak tersedia. Pilih Cash atau ABA.",
-        }
-
-    if delivery_type == "express" and payment_method == "CASH":
-        return {
-            "ok": False,
-            "error": "Kurir Express cuma bisa dipakai dengan pembayaran ABA/Transfer, bukan Cash.",
-        }
-
     user_id = user["id"]
     username = user.get("username", "")
     full_name = (user.get("first_name", "") + " " + user.get("last_name", "")).strip()
 
+    # ── Baca stok & tulis order dalam SATU transaksi ───────────────────────────
+    # Sebelumnya baca menu dan insert order jalan di 2 koneksi terpisah — ada
+    # celah admin toggle availability pas di antaranya. BEGIN IMMEDIATE ambil
+    # write-lock dari awal (SELECT polos gak otomatis mulai transaksi di
+    # sqlite3), jadi baca-stok sampai insert order jadi atomic beneran.
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        menu_rows = conn.execute("SELECT * FROM menu_items").fetchall()
+        groups_by_product = _load_modifier_groups_by_product(conn)
+        menu_map = {r["id"]: dict(r) for r in menu_rows}
+
+        valid_items = []
+        unavailable_items = []
+        subtotal = 0
+
+        for entry in items:
+            if not isinstance(entry, dict):
+                return {"ok": False, "error": "Format item tidak valid."}
+            try:
+                item_id = int(entry["item_id"])
+                qty = int(entry["qty"])
+            except (KeyError, TypeError, ValueError):
+                return {"ok": False, "error": "Format item tidak valid."}
+            if qty <= 0:
+                continue
+            m = menu_map.get(item_id)
+            if not m:
+                unavailable_items.append({"item_id": item_id, "reason": "tidak ada"})
+                continue
+            if not m["available"]:
+                unavailable_items.append({"item_id": item_id, "item_name": m["name"], "reason": "habis"})
+                continue
+
+            modifiers_input = entry.get("modifiers")
+            if modifiers_input is not None and not isinstance(modifiers_input, list):
+                return {"ok": False, "error": "Format modifiers tidak valid."}
+
+            try:
+                modifier_extra, modifier_snapshot = _resolve_modifiers(
+                    m["name"], groups_by_product.get(item_id, []), modifiers_input
+                )
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
+            item_note = (entry.get("note") or "").strip() or None
+            unit_price = m["price"] + modifier_extra
+            modifiers_json = json.dumps(modifier_snapshot, ensure_ascii=False) if modifier_snapshot else None
+            subtotal += unit_price * qty
+            valid_items.append((item_id, m["name"], qty, unit_price, item_note, modifiers_json))
+
+        if not valid_items:
+            return {"ok": False, "error": "Semua item tidak tersedia"}
+
+        min_order = get_min_order_by_address(address) if address else 0
+        if subtotal > 0 and subtotal < min_order:
+            return {
+                "ok": False,
+                "error": f"Order minimal {min_order:,}៛ untuk tujuan '{address}' — kurang {min_order - subtotal:,}៛ lagi.",
+            }
+
+        # Voucher support is disabled; only Cash and ABA are accepted.
+        if payment_method == "VOUCHER":
+            return {
+                "ok": False,
+                "error": "Metode VOUCHER tidak tersedia. Pilih Cash atau ABA.",
+            }
+
+        if delivery_type == "express" and payment_method == "CASH":
+            return {
+                "ok": False,
+                "error": "Kurir Express cuma bisa dipakai dengan pembayaran ABA/Transfer, bukan Cash.",
+            }
+
         dup = _find_recent_duplicate(conn, user_id, valid_items, note, payment_method, address, delivery_type)
         if dup:
             return {

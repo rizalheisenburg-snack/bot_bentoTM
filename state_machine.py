@@ -257,8 +257,9 @@ def transition(order_id: int, new_status: str, actor: str = "owner") -> dict:
 
 def force_cancel_order(order_id: int, reason: str) -> dict:
     """
-    Admin force-cancel: bisa dari kolom manapun, tanpa syarat status
-    (bypass TRANSITIONS sama sekali). Wajib pilih alasan dari CANCEL_REASONS.
+    Admin force-cancel: bisa dari kolom manapun SELAIN status terminal
+    (Selesai/Dibatalkan — bypass TRANSITIONS tapi tetap gak boleh nimpa order
+    yang udah kelar). Wajib pilih alasan dari CANCEL_REASONS.
     """
     if reason not in CANCEL_REASONS:
         return {"ok": False, "error": "Alasan tidak valid"}
@@ -269,6 +270,11 @@ def force_cancel_order(order_id: int, reason: str) -> dict:
         ).fetchone()
         if not row:
             return {"ok": False, "error": "Order tidak ditemukan"}
+        if row["status"] in TERMINAL:
+            return {
+                "ok": False,
+                "error": f"Order sudah '{STATUS_LABEL.get(row['status'], row['status'])}', tidak bisa di-force-cancel lagi.",
+            }
 
         conn.execute(
             """UPDATE orders SET status='Dibatalkan', cancel_reason=?,

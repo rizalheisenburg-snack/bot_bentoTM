@@ -193,7 +193,7 @@ function renderDetail() {
   if (o.payment_status === "UNPAID" && o.status !== "Dibatalkan") {
     actionButtons.push(`<button class="btn-action secondary" id="btn-mark-paid">💵 Tandai Lunas</button>`);
   }
-  if (o.status !== "Dibatalkan") {
+  if (o.status !== "Dibatalkan" && o.status !== "Selesai") {
     actionButtons.push(`<button class="btn-action danger" id="btn-force-cancel">🚫 Force Cancel</button>`);
   }
   // Fallback admin: dipakai kalau customer minta edit lewat chat manual.
