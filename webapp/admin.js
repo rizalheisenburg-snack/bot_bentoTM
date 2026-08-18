@@ -189,6 +189,12 @@ function renderDetail() {
   if (o.status !== "Dibatalkan") {
     actionButtons.push(`<button class="btn-action danger" id="btn-force-cancel">🚫 Force Cancel</button>`);
   }
+  // Fallback admin: dipakai kalau customer minta edit lewat chat manual.
+  // Sama seperti tombol di app customer, ini cuma shortcut UI — backend tetap
+  // final-check status/payment_status ulang saat Simpan (order_edit.edit_order).
+  if (o.editable) {
+    actionButtons.push(`<button class="btn-action secondary" id="btn-edit-order">✏️ Edit Order</button>`);
+  }
 
   document.getElementById("detail-body").innerHTML = `
     <div class="detail-row"><span>Customer</span><span>${escapeHtml(o.full_name || o.username || o.user_id)}</span></div>
@@ -221,6 +227,7 @@ function renderDetail() {
 
   document.getElementById("btn-force-cancel")?.addEventListener("click", () => renderCancelReasons(o));
   document.getElementById("btn-chat-open")?.addEventListener("click", () => renderChatCompose(o));
+  document.getElementById("btn-edit-order")?.addEventListener("click", () => renderEditOrder(o));
 }
 
 function renderChatCompose(o) {
@@ -274,6 +281,147 @@ function renderCancelReasons(o) {
     });
   });
   document.getElementById("btn-cancel-back")?.addEventListener("click", renderDetail);
+}
+
+/* ── Edit Order (fallback admin) ─────────────────────────────────
+   Dipakai kalau customer minta edit lewat chat manual. Beda dari app
+   customer: TIDAK ada picker modifier di sini (biar gak perlu bangun ulang
+   UI browsing-menu di kanban) — item BARU yang ditambah admin harus item
+   plain (tanpa varian). Item lama yang punya varian dibawa sebagai
+   "carry-over" (cuma qty yang bisa diubah), sama seperti di app customer,
+   karena group_id/option_id aslinya memang tidak disimpan lagi setelah
+   checkout (lihat komentar di order_edit.py). */
+let menuFlat = null;   // [{id, name, price, category, available, has_modifiers}], fetch sekali
+let editCart = {};     // { key: {name, unitPrice, qty, carryOverId?, itemId?, modifiersLabel?} }
+
+async function _ensureMenuLoaded() {
+  if (menuFlat) return menuFlat;
+  const result = await api("/api/menu");
+  menuFlat = Object.values(result.categories || {}).flat();
+  return menuFlat;
+}
+
+function _editCartFromOrder(o) {
+  const map = {};
+  (o.items || []).forEach(i => {
+    if (i.modifiers_json) {
+      let label = "";
+      try {
+        label = JSON.parse(i.modifiers_json).map(m => m.option_name).join(", ");
+      } catch { /* biarkan kosong kalau JSON gak valid */ }
+      map[`oi:${i.id}`] = { name: i.item_name, unitPrice: i.unit_price, qty: i.qty, carryOverId: i.id, modifiersLabel: label };
+    } else {
+      map[`item:${i.item_id}`] = { name: i.item_name, unitPrice: i.unit_price, qty: i.qty, itemId: i.item_id };
+    }
+  });
+  return map;
+}
+
+function _editCartTotal() {
+  return Object.values(editCart).reduce((s, e) => s + e.unitPrice * e.qty, 0);
+}
+
+function _editRowHtml(key, e) {
+  const lockedHint = e.carryOverId
+    ? `<div class="detail-item-note">🧩 ${escapeHtml(e.modifiersLabel || "")} — varian terkunci, cuma qty yang bisa diubah</div>`
+    : "";
+  return `
+    <div class="edit-item-row" data-key="${key}">
+      <div class="edit-item-info">
+        <div>${escapeHtml(e.name)}</div>
+        ${lockedHint}
+        <div class="detail-item-note">${riel(e.unitPrice)} × ${e.qty} = ${riel(e.unitPrice * e.qty)}</div>
+      </div>
+      <div class="qty-control">
+        <button class="qty-btn minus" data-key="${key}">−</button>
+        <span class="qty-num">${e.qty}</span>
+        <button class="qty-btn plus" data-key="${key}">+</button>
+      </div>
+    </div>`;
+}
+
+async function renderEditOrder(o) {
+  await _ensureMenuLoaded();
+  editCart = _editCartFromOrder(o);
+  _renderEditOrderBody(o);
+}
+
+function _renderEditOrderBody(o) {
+  const entries = Object.entries(editCart);
+  const rows = entries.length
+    ? entries.map(([k, e]) => _editRowHtml(k, e)).join("")
+    : `<div class="column-empty">Order kosong — tambah item dulu di bawah</div>`;
+
+  const addOptions = (menuFlat || [])
+    .filter(m => m.available && !m.has_modifiers)
+    .map(m => `<option value="${m.id}">${escapeHtml(m.name)} — ${riel(m.price)}</option>`)
+    .join("");
+
+  document.getElementById("detail-body").innerHTML = `
+    <div class="detail-note">Edit Order #${o.id} — tambah/kurangi/hapus item. Perubahan otomatis renotif kanban & cetak ulang struk.</div>
+    <div class="edit-items-list">${rows}</div>
+    <div class="edit-add-row">
+      <select id="edit-add-select">
+        <option value="">+ Tambah item...</option>
+        ${addOptions}
+      </select>
+      <button class="btn-action secondary" id="btn-edit-add">Tambah</button>
+    </div>
+    <div class="detail-row detail-total"><span>Total</span><span>${riel(_editCartTotal())}</span></div>
+    <div class="action-row">
+      <button class="btn-action" id="btn-edit-save">💾 Simpan Perubahan</button>
+      <button class="btn-action secondary" id="btn-edit-back">« Batal</button>
+    </div>
+    <div class="detail-note">ℹ️ Item ber-varian (🧩) cuma bisa diubah jumlahnya di sini. Buat ganti varian atau nambah item baru yang punya pilihan varian, arahkan customer edit sendiri lewat app.</div>
+  `;
+
+  document.querySelectorAll("#detail-body .edit-item-row .qty-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.key;
+      if (btn.classList.contains("plus")) {
+        editCart[key].qty++;
+      } else {
+        editCart[key].qty--;
+        if (editCart[key].qty <= 0) delete editCart[key];
+      }
+      _renderEditOrderBody(o);
+    });
+  });
+
+  document.getElementById("btn-edit-add").addEventListener("click", () => {
+    const select = document.getElementById("edit-add-select");
+    const itemId = parseInt(select.value);
+    if (!itemId) return;
+    const m = (menuFlat || []).find(x => x.id === itemId);
+    if (!m) return;
+    const key = `item:${itemId}`;
+    if (editCart[key]) editCart[key].qty++;
+    else editCart[key] = { name: m.name, unitPrice: m.price, qty: 1, itemId };
+    _renderEditOrderBody(o);
+  });
+
+  document.getElementById("btn-edit-save").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-edit-save");
+    btn.disabled = true;
+    btn.textContent = "Menyimpan...";
+    const items = Object.values(editCart).map(e =>
+      e.carryOverId ? { order_item_id: e.carryOverId, qty: e.qty } : { item_id: e.itemId, qty: e.qty }
+    );
+    const r = await api(`/api/orders/${o.id}/edit`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    });
+    if (r.ok) {
+      tg?.HapticFeedback?.notificationOccurred("success");
+      closeDetail();
+    } else {
+      tg?.showAlert?.(r.error || "Gagal menyimpan perubahan.");
+      btn.disabled = false;
+      btn.textContent = "💾 Simpan Perubahan";
+    }
+  });
+
+  document.getElementById("btn-edit-back")?.addEventListener("click", renderDetail);
 }
 
 document.getElementById("btn-detail-close").addEventListener("click", closeDetail);

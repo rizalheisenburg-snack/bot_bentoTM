@@ -11,6 +11,12 @@ let addressTiers = { tiers: {}, default: 0 };  // minimal order per alamat, dari
 let minOrder = 0;      // ambang minimal order (riel) buat alamat yang lagi dipilih
 let selectedDeliveryType = "internal";  // 'internal' | 'express'
 
+/* Mode Edit Order: dipakai bareng screen-cart yang sama (bukan screen baru),
+   biar reuse renderCart/menu-picker/customize yang sudah ada. Saat non-null,
+   `cart` isinya item-item order yang lagi diedit (bukan keranjang belanja baru). */
+let editingOrderId = null;
+let _cartBackup = null;  // snapshot cart asli sebelum masuk mode edit, dikembalikan pas keluar
+
 /* ── Helpers ──────────────────────────────────────────────────── */
 const escapeAttr = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
@@ -382,30 +388,36 @@ document.getElementById("cart-items").addEventListener("input", e => {
   cart[key].note = input.value;
 });
 
-function renderCart() {
-  const container = document.getElementById("cart-items");
-  const entries = Object.entries(cart);
-
-  if (!entries.length) {
-    container.innerHTML = `<div class="empty-cart">🛒 Keranjang kosong</div>`;
-  } else {
-    container.innerHTML = entries.map(([key, { item, qty, note, modifiers }]) => {
-      const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
-      const unitPrice = item.price + delta;
-      const modsText = (modifiers || []).map(m => m.option_name).join(", ");
-      const emoji = item.emoji || "☕";
-      const visual = item.image_url
-        ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy"
-               onload="this.nextElementSibling.style.display='none'"
-               onerror="this.style.display='none'" />
-           <span class="cart-emoji-fallback">${emoji}</span>`
-        : emoji;
-      return `
+function cartItemHtml(key, entry) {
+  const { item, qty, note, modifiers, carryOverId, modifiersLabel } = entry;
+  const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
+  const unitPrice = item.price + delta;
+  const modsText = carryOverId ? (modifiersLabel || "") : (modifiers || []).map(m => m.option_name).join(", ");
+  const emoji = item.emoji || "☕";
+  const visual = item.image_url
+    ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy"
+           onload="this.nextElementSibling.style.display='none'"
+           onerror="this.style.display='none'" />
+       <span class="cart-emoji-fallback">${emoji}</span>`
+    : emoji;
+  // Item carry-over (punya modifier/varian dari order lama): group_id/option_id
+  // aslinya TIDAK disimpan lagi setelah checkout (order_items cuma nyimpen nama
+  // buat ditampilkan), jadi gak bisa direkonstruksi buat kirim ulang ke backend.
+  // Qty tetap boleh diubah/dihapus, tapi note & varian dikunci di sini — kalau
+  // mau ganti variannya, hapus baris ini lalu tambah ulang lewat menu.
+  const lockedHint = carryOverId
+    ? `<div class="cart-item-locked-hint">🧩 Varian terkunci di sini — cuma jumlah yang bisa diubah. Mau ganti varian? Hapus lalu tambah ulang dari menu.</div>`
+    : "";
+  const noteInput = carryOverId ? "" : `
+        <input type="text" class="cart-item-note-input" data-key="${key}"
+               placeholder="+ catatan untuk item ini (opsional)"
+               value="${escapeAttr(note || "")}" maxlength="200" />`;
+  return `
       <div class="cart-item">
         <div class="cart-item-row">
           <span class="cart-emoji">${visual}</span>
           <div class="cart-item-info">
-            <div class="cart-item-name">${item.name}</div>
+            <div class="cart-item-name">${escapeHtml(item.name)}</div>
             ${modsText ? `<div class="cart-item-mods">${escapeHtml(modsText)}</div>` : ""}
             <div class="cart-item-price">${riel(unitPrice)} × ${qty} = <strong>${riel(unitPrice * qty)}</strong></div>
           </div>
@@ -415,14 +427,27 @@ function renderCart() {
             <button class="qty-btn plus" data-key="${key}">+</button>
           </div>
         </div>
-        <input type="text" class="cart-item-note-input" data-key="${key}"
-               placeholder="+ catatan untuk item ini (opsional)"
-               value="${escapeAttr(note || "")}" maxlength="200" />
+        ${lockedHint}
+        ${noteInput}
       </div>`;
-    }).join("");
+}
+
+function renderCart() {
+  const container = document.getElementById("cart-items");
+  const entries = Object.entries(cart);
+
+  if (!entries.length) {
+    container.innerHTML = `<div class="empty-cart">🛒 Keranjang kosong</div>`;
+  } else {
+    container.innerHTML = entries.map(([key, entry]) => cartItemHtml(key, entry)).join("");
   }
 
   updatePriceSummary();
+
+  if (editingOrderId) {
+    document.getElementById("btn-edit-save").disabled = !entries.length;
+    return;
+  }
   const empty = !entries.length;
   const belowMin = minOrder > 0 && cartSubtotal() < minOrder;
   const expressBlocksCash = selectedDeliveryType === "express";
@@ -434,7 +459,7 @@ function renderCart() {
 function updatePriceSummary() {
   const sub = cartSubtotal();
   document.getElementById("sum-total").textContent = riel(sub);
-  const belowMin = minOrder > 0 && sub < minOrder && sub > 0;
+  const belowMin = !editingOrderId && minOrder > 0 && sub < minOrder && sub > 0;
   const warning = document.getElementById("min-order-warning");
   warning.classList.toggle("hidden", !belowMin);
   if (belowMin) {
@@ -572,6 +597,109 @@ function clearCart() {
   updateCartFab();
 }
 
+/* ── Edit Order (partial edit) ────────────────────────────────────
+   Reuse screen-cart yang sama persis dipakai buat checkout baru — cuma
+   `cart` di-isi dari isi order yang sedang diedit, dan footer diganti dari
+   "pilih metode bayar" jadi "Simpan/Batal". Item yang punya modifier/varian
+   dibawa sebagai entry "carry-over" (key berawalan "oi:") karena backend
+   tidak menyimpan ulang group_id/option_id aslinya — cuma qty yang bisa
+   diubah buat entry jenis ini (lihat cartItemHtml). */
+
+function _findLiveMenuItem(itemId) {
+  return Object.values(menu).flat().find(m => m.id === itemId);
+}
+
+function startEditOrder(order) {
+  stopPolling();
+  _cartBackup = JSON.parse(JSON.stringify(cart));
+  Object.keys(cart).forEach(k => delete cart[k]);
+  editingOrderId = order.id;
+
+  order.items.forEach(i => {
+    if (i.modifiers_json) {
+      let modifiersLabel = "";
+      try {
+        modifiersLabel = JSON.parse(i.modifiers_json).map(m => m.option_name).join(", ");
+      } catch { /* biarkan kosong kalau JSON gak valid */ }
+      cart[`oi:${i.id}`] = {
+        item: { id: i.item_id, name: i.item_name, price: i.unit_price, emoji: "🧩" },
+        qty: i.qty,
+        carryOverId: i.id,
+        modifiersLabel,
+      };
+    } else {
+      // Pakai harga LIVE dari menu kalau produknya masih ada, biar preview harga
+      // konsisten dengan yang bakal di-resolve ulang backend pas Simpan. Kalau
+      // produk sudah dihapus dari menu, fallback ke snapshot lama (tetap bisa
+      // dikurangi/dihapus meski gak bisa "ditambah" lagi qty-nya kalau habis).
+      const live = _findLiveMenuItem(i.item_id);
+      cart[String(i.item_id)] = {
+        item: live || { id: i.item_id, name: i.item_name, price: i.unit_price, emoji: "🍽️", available: 0 },
+        qty: i.qty,
+        note: i.item_note || "",
+      };
+    }
+  });
+
+  document.getElementById("cart-title").textContent = `Edit Order #${order.id}`;
+  document.getElementById("cart-footer-normal").classList.add("hidden");
+  document.getElementById("pay-method-row").classList.add("hidden");
+  document.getElementById("edit-actions-row").classList.remove("hidden");
+  renderCart();
+  show("screen-cart");
+}
+
+function exitEditMode() {
+  editingOrderId = null;
+  Object.keys(cart).forEach(k => delete cart[k]);
+  if (_cartBackup) {
+    Object.assign(cart, _cartBackup);
+    _cartBackup = null;
+  }
+  document.getElementById("cart-title").textContent = "Keranjang";
+  document.getElementById("cart-footer-normal").classList.remove("hidden");
+  document.getElementById("pay-method-row").classList.remove("hidden");
+  document.getElementById("edit-actions-row").classList.add("hidden");
+  updateCartFab();
+}
+
+document.getElementById("btn-edit-cancel").addEventListener("click", () => {
+  const oid = editingOrderId;
+  exitEditMode();
+  loadOrderDetail(oid);
+});
+
+document.getElementById("btn-edit-save").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-edit-save");
+  btn.disabled = true;
+  btn.textContent = "Menyimpan...";
+
+  const items = Object.values(cart).map(({ item, qty, note, modifiers, carryOverId }) => {
+    if (carryOverId) return { order_item_id: carryOverId, qty };
+    const entry = { item_id: item.id, qty, note: (note || "").trim() };
+    if (modifiers?.length) {
+      entry.modifiers = modifiers.map(m => ({ group_id: m.group_id, option_id: m.option_id }));
+    }
+    return entry;
+  });
+
+  const oid = editingOrderId;
+  const result = await api(`/api/orders/${oid}/edit`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+
+  if (result.ok) {
+    tg?.HapticFeedback?.notificationOccurred("success");
+    exitEditMode();
+    loadOrderDetail(oid);
+  } else {
+    tg?.showAlert?.(result.error || "Gagal menyimpan perubahan.");
+    btn.disabled = false;
+    btn.textContent = "💾 Simpan Perubahan";
+  }
+});
+
 /* ── Success screen ───────────────────────────────────────────── */
 function showSuccess(result) {
   document.getElementById("success-order-id").textContent = "#" + result.order_id;
@@ -663,6 +791,14 @@ async function _fetchOrderDetail(id) {
     ? `<button id="btn-change-method" class="btn-change-method">🔄 Ganti Metode Bayar (${o.payment_method || "CASH"})</button>`
     : "";
 
+  // `o.editable` dihitung backend (Diterima/Diproses DAN belum PAID) — tombol
+  // ini cuma shortcut UI, penolakan yang sesungguhnya tetap dicek ulang di
+  // server saat Simpan (lihat order_edit.edit_order), jadi aman walau status
+  // order berubah persis di antara render ini dan klik Simpan.
+  const editHtml = o.editable
+    ? `<button id="btn-edit-order" class="btn-change-method">✏️ Edit Order</button>`
+    : "";
+
   body.innerHTML = `
     <div class="detail-status-big">${o.status_label}</div>
     <div class="detail-items">
@@ -676,8 +812,13 @@ async function _fetchOrderDetail(id) {
       ${payHtml}
       ${o.note ? `<div class="detail-note">📝 ${escapeHtml(o.note)}</div>` : ""}
     </div>
+    ${editHtml}
     ${changeMethodHtml}
     ${cancelHtml}`;
+
+  document.getElementById("btn-edit-order")?.addEventListener("click", () => {
+    startEditOrder(o);
+  });
 
   document.getElementById("btn-cancel-order")?.addEventListener("click", () => {
     const doCancel = async () => {

@@ -40,7 +40,7 @@
 <div id="screen-cart" class="screen">
   <div class="topbar">
     <button class="icon-btn back-btn" data-target="screen-menu">‹</button>
-    <span class="topbar-title">Keranjang</span>
+    <span class="topbar-title" id="cart-title">Keranjang</span>
   </div>
   <div class="cart-scroll">
   <div id="cart-items" class="cart-list"></div>
@@ -49,40 +49,42 @@
   </div>
   <div class="cart-footer">
 
-    <div class="address-section">
-      <div class="addr-row">
-        <span class="addr-label-inline">📍 Tujuan:</span>
-        <button id="btn-addr-pick" class="btn-addr-pick">KD ▾</button>
-      </div>
-      <div class="addr-picker hidden" id="addr-picker">
-        <div class="address-chips">
-          <button class="addr-chip active" data-addr="KD">KD</button>
-          <button class="addr-chip" data-addr="Hp Tower">Hp Tower</button>
-          <button class="addr-chip" data-addr="WON">WON</button>
-          <button class="addr-chip" data-addr="The Rich">The Rich</button>
-          <button class="addr-chip" data-addr="Hp Avenue">Hp Avenue</button>
-          <button class="addr-chip" data-addr="TM">TM</button>
+    <div id="cart-footer-normal">
+      <div class="address-section">
+        <div class="addr-row">
+          <span class="addr-label-inline">📍 Tujuan:</span>
+          <button id="btn-addr-pick" class="btn-addr-pick">KD ▾</button>
         </div>
-        <input id="addr-custom" class="addr-input" type="text" placeholder="Alamat lain (jarang diantar)..." />
+        <div class="addr-picker hidden" id="addr-picker">
+          <div class="address-chips">
+            <button class="addr-chip active" data-addr="KD">KD</button>
+            <button class="addr-chip" data-addr="Hp Tower">Hp Tower</button>
+            <button class="addr-chip" data-addr="WON">WON</button>
+            <button class="addr-chip" data-addr="The Rich">The Rich</button>
+            <button class="addr-chip" data-addr="Hp Avenue">Hp Avenue</button>
+            <button class="addr-chip" data-addr="TM">TM</button>
+          </div>
+          <input id="addr-custom" class="addr-input" type="text" placeholder="Alamat lain (jarang diantar)..." />
+        </div>
       </div>
-    </div>
 
-    <div class="delivery-section">
-      <div class="delivery-label">🚚 Metode Antar:</div>
-      <div class="delivery-method-row">
-        <button id="btn-delivery-internal" class="btn-delivery-method active" data-type="internal">🚴 Kurir Internal · Gratis</button>
-        <button id="btn-delivery-express" class="btn-delivery-method" data-type="express">🚀 Kurir Express · Estimasi <span id="express-fee-amount">-</span></button>
+      <div class="delivery-section">
+        <div class="delivery-label">🚚 Metode Antar:</div>
+        <div class="delivery-method-row">
+          <button id="btn-delivery-internal" class="btn-delivery-method active" data-type="internal">🚴 Kurir Internal · Gratis</button>
+          <button id="btn-delivery-express" class="btn-delivery-method" data-type="express">🚀 Kurir Express · Estimasi <span id="express-fee-amount">-</span></button>
+        </div>
+        <div id="delivery-express-note" class="delivery-express-note hidden">
+          💰 Ongkos Kurir Express dibayar <strong>cash langsung ke kurir</strong> saat barang sampai (di luar pembayaran order ini).
+        </div>
+        <div id="delivery-express-cash-warning" class="delivery-warning hidden">
+          ⚠️ Kurir Express hanya tersedia untuk pembayaran ABA/Transfer.
+        </div>
       </div>
-      <div id="delivery-express-note" class="delivery-express-note hidden">
-        💰 Ongkos Kurir Express dibayar <strong>cash langsung ke kurir</strong> saat barang sampai (di luar pembayaran order ini).
-      </div>
-      <div id="delivery-express-cash-warning" class="delivery-warning hidden">
-        ⚠️ Kurir Express hanya tersedia untuk pembayaran ABA/Transfer.
-      </div>
-    </div>
 
-    <div class="note-row">
-      <textarea id="note-input" placeholder="Catatan untuk dapur (opsional)" rows="2"></textarea>
+      <div class="note-row">
+        <textarea id="note-input" placeholder="Catatan untuk dapur (opsional)" rows="2"></textarea>
+      </div>
     </div>
 
     <div class="price-summary">
@@ -90,9 +92,14 @@
       <div id="min-order-warning" class="min-order-warning hidden"></div>
     </div>
 
-    <div class="pay-method-row">
+    <div id="pay-method-row" class="pay-method-row">
       <button id="btn-pay-cash" class="btn-pay-method">💵 Cash</button>
       <button id="btn-pay-aba" class="btn-pay-method aba">🏦 ABA</button>
+    </div>
+
+    <div id="edit-actions-row" class="pay-method-row hidden">
+      <button id="btn-edit-cancel" class="btn-pay-method">✕ Batal</button>
+      <button id="btn-edit-save" class="btn-pay-method aba">💾 Simpan Perubahan</button>
     </div>
   </div>
   </div>

@@ -519,6 +519,11 @@ html, body {
   box-shadow: var(--glow);
 }
 .btn-pay-method.hidden { display: none; }
+#cart-footer-normal.hidden { display: none; }
+.pay-method-row.hidden { display: none; }
+.cart-item-locked-hint {
+  font-size: 11.5px; color: var(--hint); font-style: italic;
+}
 
 /* ── Product customize ────────────────────────────────────────── */
 .customize-body {

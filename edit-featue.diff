@@ -1,0 +1,1029 @@
+﻿diff --git a/order_edit.py b/order_edit.py
+new file mode 100644
+index 0000000..9baae8f
+--- /dev/null
++++ b/order_edit.py
+@@ -0,0 +1,277 @@
++"""Edit order (partial edit) â€” tambah/kurangi qty/hapus/replace item pada order
++yang masih aktif (Diterima/Diproses). Sengaja MIRROR gaya checkout_flow.py:
++baca menu & modifier LIVE dari DB, bukan percaya harga/stok dari client."""
++from __future__ import annotations
++import json
++
++# Reuse helper privat dari checkout_flow.py â€” biar resolusi modifier & harga
++# selalu konsisten dengan logic checkout (satu sumber kebenaran, gak dobel-tulis).
++from checkout_flow import _load_modifier_groups_by_product, _resolve_modifiers
++from db import get_conn
++from state_machine import EDITABLE_STATUSES, STATUS_LABEL
++
++
++def edit_order(
++    order_id: int,
++    actor_id: int,
++    actor_role: str,
++    items: list[dict],
++    note: str | None = None,
++) -> dict:
++    """
++    items: campuran dari 2 bentuk entry, tergantung item-nya:
++
++      1) {"item_id": int, "qty": int, "note": str (optional),
++          "modifiers": [{"group_id": int, "option_id": int}, ...] (optional)}
++         Item PLAIN (tanpa modifier) atau item BARU yang mau ditambah â€” harga &
++         modifier di-resolve LIVE dari DB, sama seperti checkout_flow.checkout().
++
++      2) {"order_item_id": int, "qty": int}
++         "Carry-over" utuh baris order_items yang SUDAH ADA â€” dipakai KHUSUS
++         buat item yang punya modifier (varian). Kenapa beda dari (1): begitu
++         checkout selesai, order_items.modifiers_json cuma nyimpen NAMA grup/opsi
++         buat ditampilkan (lihat _resolve_modifiers di checkout_flow.py), BUKAN
++         group_id/option_id aslinya â€” jadi gak ada cara valid buat "resolve ulang"
++         pilihan modifier lewat _resolve_modifiers() tanpa client kirim ulang
++         pilihan itu dari awal. Carry-over ini cukup pertahankan
++         item_id/item_name/unit_price/item_note/modifiers_json APA ADANYA dari
++         baris lama, cuma qty yang boleh berubah (termasuk qty=0 buat menghapus
++         baris ini). Tidak ada validasi availability ulang buat baris jenis ini
++         karena ini bukan permintaan baru, cuma penyesuaian qty dari sesuatu yang
++         sudah committed (menambah/menyisakan jumlahnya, bukan menambah demand
++         baru terhadap stok).
++
++    PENTING: `items` adalah DAFTAR LENGKAP isi order SETELAH diedit (bukan delta
++    tambah/kurang) â€” format sama persis dengan `items` di checkout_flow.checkout(),
++    ditambah bentuk (2) di atas. Backend yang men-diff terhadap order_items yang
++    ada sekarang:
++      - item baru di daftar tapi belum ada di order lama  -> efeknya "tambah item"
++      - item lama tidak ada lagi di daftar baru            -> efeknya "hapus item"
++      - qty item berubah                                   -> efeknya "kurangi/tambah qty"
++      - item lama diganti item_id lain dengan qty sama      -> efeknya "replace item"
++
++    actor_role: 'customer' | 'owner' â€” dicatat ke order_edits buat audit trail
++    (siapa yang mengubah, kapan, apa isi SEBELUM diubah).
++
++    Beda sengaja dari checkout(): kalau ADA SATU item bentuk (1) yang habis/tidak
++    ada di menu, SELURUH edit ditolak (atomic) â€” bukan didiam-diamkan dibuang
++    seperti checkout. Alasannya: di checkout user belum commit apa-apa jadi "skip
++    item yang habis, lanjutkan sisanya" itu wajar; di edit, user/admin sudah punya
++    ekspektasi spesifik ("ganti nasi goreng jadi mie goreng") â€” kalau item target
++    diam-diam gagal, order_items yang tersisa bisa jadi sama sekali gak sesuai
++    maksud siapa yang minta edit. Reject-dengan-pesan-jelas lebih aman.
++
++    Return:
++      {"ok": True, "order_id": int, "subtotal": int, "total": int}
++      {"ok": False, "error": str}
++    """
++    if not items:
++        return {
++            "ok": False,
++            "error": "Order tidak boleh kosong â€” gunakan Cancel Order kalau mau membatalkan seluruh order.",
++        }
++
++    with get_conn() as conn:
++        row = conn.execute(
++            "SELECT status, payment_status, subtotal FROM orders WHERE id=?", (order_id,)
++        ).fetchone()
++        if not row:
++            return {"ok": False, "error": "Order tidak ditemukan"}
++
++        # â”€â”€ Final check status di backend â€” TIDAK percaya state dari client.
++        # Ini yang menutup race condition: status order divalidasi ulang di sini,
++        # di dalam transaksi yang sama dengan penulisan, bukan hasil asumsi dari
++        # payload request atau state yang di-cache di sisi client. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++        if row["status"] not in EDITABLE_STATUSES:
++            return {
++                "ok": False,
++                "error": (
++                    f"Order sudah '{STATUS_LABEL.get(row['status'], row['status'])}', "
++                    "tidak bisa diedit lagi."
++                ),
++            }
++
++        # â”€â”€ Out of scope (sesuai keputusan): order yang sudah dibayar via ABA
++        # tidak diotomasi â€” arahkan ke penyesuaian manual oleh admin. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++        if row["payment_status"] == "PAID":
++            return {
++                "ok": False,
++                "error": (
++                    "Order ini sudah dibayar (LUNAS). Edit otomatis tidak tersedia untuk "
++                    "order yang sudah lunas â€” hubungi admin buat penyesuaian manual."
++                ),
++            }
++
++        old_subtotal = row["subtotal"]
++
++        # â”€â”€ Baca menu & modifier LIVE dari DB (harga & stok dari server) â”€â”€â”€â”€â”€â”€â”€
++        menu_rows = conn.execute("SELECT * FROM menu_items").fetchall()
++        menu_map = {r["id"]: dict(r) for r in menu_rows}
++        groups_by_product = _load_modifier_groups_by_product(conn)
++
++        # Baris order_items LAMA â€” dipakai buat (a) snapshot audit SEBELUM
++        # dihapus, dan (b) lookup carry-over bentuk (2) di atas.
++        old_rows = conn.execute(
++            "SELECT * FROM order_items WHERE order_id=?", (order_id,)
++        ).fetchall()
++        old_items_by_id = {r["id"]: dict(r) for r in old_rows}
++        old_items_snapshot = list(old_items_by_id.values())
++
++        # â”€â”€ Validasi tiap item â€” REJECT ATOMIC kalau ada yang invalid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++        # Entry di-akumulasi ke `merged` dulu (bukan langsung append ke new_items)
++        # supaya request yang (sengaja/tidak) ngirim item_id yang sama 2x, atau
++        # order_item_id carry-over yang sama 2x, gak bikin baris order_items
++        # ganda buat "produk" yang identik â€” qty-nya di-jumlah jadi 1 baris.
++        # Entry item_id sama TAPI kombinasi modifier beda tetap dianggap baris
++        # terpisah (itu varian yang berbeda, bukan duplikat).
++        merged: dict = {}
++        merge_order: list = []
++
++        for entry in items:
++            if not isinstance(entry, dict):
++                return {"ok": False, "error": "Format item tidak valid."}
++
++            # Bentuk (2): carry-over baris lama apa adanya, cuma qty yang berubah.
++            if "order_item_id" in entry:
++                try:
++                    oi_id = int(entry["order_item_id"])
++                    qty = int(entry["qty"])
++                except (KeyError, TypeError, ValueError):
++                    return {"ok": False, "error": "Format item tidak valid."}
++                if qty <= 0:
++                    continue  # qty 0/negatif = baris ini dianggap dihapus
++
++                old = old_items_by_id.get(oi_id)
++                if not old:
++                    return {
++                        "ok": False,
++                        "error": f"Item order #{oi_id} tidak ditemukan di order ini.",
++                    }
++                key = ("carryover", oi_id)
++                if key in merged:
++                    merged[key]["qty"] += qty
++                else:
++                    merged[key] = {
++                        "qty": qty,
++                        "row": (
++                            old["item_id"], old["item_name"], old["unit_price"],
++                            old["item_note"], old["modifiers_json"],
++                        ),
++                    }
++                    merge_order.append(key)
++                continue
++
++            # Bentuk (1): item plain/baru â€” resolve LIVE dari menu (pola checkout).
++            try:
++                item_id = int(entry["item_id"])
++                qty = int(entry["qty"])
++            except (KeyError, TypeError, ValueError):
++                return {"ok": False, "error": "Format item tidak valid."}
++            if qty <= 0:
++                continue  # qty 0/negatif = item ini dianggap dihapus dari order
++
++            modifiers_input = entry.get("modifiers")
++            if modifiers_input is not None and not isinstance(modifiers_input, list):
++                return {"ok": False, "error": "Format modifiers tidak valid."}
++
++            m = menu_map.get(item_id)
++            if not m:
++                return {"ok": False, "error": f"Item id {item_id} tidak ditemukan di menu."}
++            if not m["available"]:
++                return {
++                    "ok": False,
++                    "error": f"'{m['name']}' sudah habis, tidak bisa ditambahkan/dipertahankan di order.",
++                }
++
++            try:
++                modifier_extra, modifier_snapshot = _resolve_modifiers(
++                    m["name"], groups_by_product.get(item_id, []), modifiers_input
++                )
++            except ValueError as e:
++                return {"ok": False, "error": str(e)}
++
++            item_note = str(entry.get("note") or "").strip() or None
++            unit_price = m["price"] + modifier_extra
++            modifiers_json = (
++                json.dumps(modifier_snapshot, ensure_ascii=False) if modifier_snapshot else None
++            )
++
++            # Kunci merge: item_id + kombinasi group_id/option_id yang diminta
++            # (dinormalisasi & diurutkan) â€” bukan snapshot nama, biar entry yang
++            # milih varian sama persis ke-merge, sementara varian berbeda tetap
++            # baris terpisah. Entry yang gak valid di sini cukup diabaikan dari
++            # signature (bukan crash) â€” _resolve_modifiers() di atas udah jadi
++            # validator utama; kalau grup wajib jadi "belum lengkap" gara-gara
++            # entry sampah, itu sudah ke-reject duluan sebelum baris ini.
++            mod_sig_list = []
++            for s in (modifiers_input or []):
++                if not isinstance(s, dict):
++                    continue
++                try:
++                    mod_sig_list.append((int(s["group_id"]), int(s["option_id"])))
++                except (KeyError, TypeError, ValueError):
++                    continue
++            mod_sig = tuple(sorted(mod_sig_list))
++            key = ("plain", item_id, mod_sig)
++            if key in merged:
++                merged[key]["qty"] += qty
++            else:
++                merged[key] = {
++                    "qty": qty,
++                    "row": (item_id, m["name"], unit_price, item_note, modifiers_json),
++                }
++                merge_order.append(key)
++
++        new_items = []
++        subtotal = 0
++        for key in merge_order:
++            qty = merged[key]["qty"]
++            item_id, item_name, unit_price, item_note, modifiers_json = merged[key]["row"]
++            subtotal += unit_price * qty
++            new_items.append((item_id, item_name, qty, unit_price, item_note, modifiers_json))
++
++        if not new_items:
++            return {
++                "ok": False,
++                "error": "Order tidak boleh kosong â€” gunakan Cancel Order kalau mau membatalkan seluruh order.",
++            }
++
++        # TODO: re-validasi minimum order per address tier setelah edit
++        # (geo.get_min_order_by_address) â€” SENGAJA belum diimplementasi, masih
++        # nunggu klarifikasi kebijakan dari owner: apakah edit yang bikin
++        # subtotal turun di bawah minimum harus ditolak, atau tetap dibiarkan
++        # lolos karena order aslinya sudah lolos syarat minimum saat checkout.
++
++        # â”€â”€ Tulis ulang order_items (delete + insert, atomic 1 transaksi) â”€â”€â”€â”€â”€â”€
++        conn.execute("DELETE FROM order_items WHERE order_id=?", (order_id,))
++        conn.executemany(
++            """INSERT INTO order_items
++               (order_id, item_id, item_name, qty, unit_price, item_note, modifiers_json)
++               VALUES (?,?,?,?,?,?,?)""",
++            [(order_id, *item_row) for item_row in new_items],
++        )
++
++        set_clauses = ["subtotal=?", "updated_at=datetime('now')"]
++        params: list = [subtotal]
++        if note is not None:
++            set_clauses.append("note=?")
++            params.append(note)
++        params.append(order_id)
++        conn.execute(f"UPDATE orders SET {', '.join(set_clauses)} WHERE id=?", params)
++
++        # â”€â”€ Audit trail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++        conn.execute(
++            """INSERT INTO order_edits
++               (order_id, actor_user_id, actor_role, old_subtotal, new_subtotal, items_snapshot_json)
++               VALUES (?,?,?,?,?,?)""",
++            (
++                order_id,
++                actor_id,
++                actor_role,
++                old_subtotal,
++                subtotal,
++                json.dumps(old_items_snapshot, ensure_ascii=False),
++            ),
++        )
++
++    return {"ok": True, "order_id": order_id, "subtotal": subtotal, "total": subtotal}
+diff --git a/schema.sql b/schema.sql
+index 32539b8..102a9a6 100644
+--- a/schema.sql
++++ b/schema.sql
+@@ -112,3 +112,20 @@ CREATE TABLE IF NOT EXISTS modifier_options (
+     is_available INTEGER NOT NULL DEFAULT 1,  -- konvensi sama dengan menu_items.available
+     FOREIGN KEY (group_id) REFERENCES modifier_groups(id)
+ );
++
++-- Audit trail fitur Edit Order (partial edit). Satu baris per aksi edit sukses,
++-- nyimpen snapshot isi order_items SEBELUM diubah â€” buat jejak kalau ada dispute
++-- customer vs kasir ("lho tadi pesenannya bukan ini"). Tabel baru murni (bukan
++-- ALTER kolom existing), jadi cukup CREATE TABLE IF NOT EXISTS di sini, aman
++-- dijalankan ulang lewat init_db() baik buat instalasi baru maupun DB lama.
++CREATE TABLE IF NOT EXISTS order_edits (
++    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
++    order_id             INTEGER NOT NULL,
++    actor_user_id        INTEGER NOT NULL,   -- customer user_id ATAU OWNER_ID
++    actor_role           TEXT    NOT NULL,   -- 'customer' | 'owner'
++    old_subtotal         INTEGER NOT NULL,
++    new_subtotal         INTEGER NOT NULL,
++    items_snapshot_json  TEXT    NOT NULL,   -- isi order_items SEBELUM diedit (JSON)
++    created_at           TEXT    DEFAULT (datetime('now')),  -- UTC
++    FOREIGN KEY (order_id) REFERENCES orders(id)
++);
+diff --git a/server.py b/server.py
+index fa08278..4a6a529 100644
+--- a/server.py
++++ b/server.py
+@@ -18,6 +18,7 @@ from checkout_flow import checkout, verify_init_data
+ from config import BOT_USERNAME, OWNER_ID, PRINTER_AGENT_TOKEN
+ from db import get_conn, get_setting
+ from geo import ADDRESS_MIN_ORDER, DEFAULT_ADDRESS_MIN_ORDER
++from order_edit import edit_order
+ from owner_console import _order_keyboard, _order_text, cancel_notif_text
+ from printing import (
+     create_print_job,
+@@ -438,6 +439,80 @@ async def _notify_owner_payment_method_change(request: web.Request, order_id: in
+         log.exception("gagal notif ganti metode ke owner")
+ 
+ 
++# â”€â”€ Edit Order (partial edit) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++# Dibuka HANYA di status Diterima/Diproses (dicek final di edit_order(), bukan
++# cuma dikunci di UI). Endpoint yang sama dipakai baik oleh customer (jalur
++# utama) MAUPUN owner (fallback kalau customer minta edit lewat chat manual) â€”
++# otorisasinya reuse _forbidden_for_order() yang sudah ada, sama seperti pola
++# cancel & payment-method di atas.
++
++@routes.post("/api/orders/{order_id}/edit")
++async def api_edit_order(request):
++    user, err = _require_user(request)
++    if err:
++        return err
++    oid = int(request.match_info["order_id"])
++    o = get_order(oid)
++    if not o:
++        return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
++    err = _forbidden_for_order(user, o)
++    if err:
++        return err
++
++    actor_role = "owner" if user["id"] == OWNER_ID else "customer"
++    try:
++        body = await request.json()
++        result = edit_order(
++            order_id=oid,
++            actor_id=user["id"],
++            actor_role=actor_role,
++            items=body.get("items", []),
++            note=body.get("note"),
++        )
++    except Exception:
++        # Sengaja dibungkus try/except di sini (sama seperti pola api_checkout) â€”
++        # kalau ada input malformed yang lolos dari validasi di edit_order() dan
++        # bikin exception gak terduga, kita tetap balikin JSON error yang rapi,
++        # bukan 500 HTML generic dari aiohttp yang bikin _fetchOrderDetail/doSaveEdit
++        # di FE gagal parse response-nya.
++        log.exception("edit order error, order #%s", oid)
++        return _json({"ok": False, "error": "Server error, coba lagi ya."}, 500)
++
++    if result.get("ok"):
++        await broadcast_order_update(oid)
++        await _notify_owner_order_edited(request, oid, actor_role)
++        # Reprint struk lewat flow print yang sudah ada (print_jobs + push ke agent)
++        await push_print_job(oid)
++    return _result_json(result)
++
++
++async def _notify_owner_order_edited(request: web.Request, order_id: int, actor_role: str) -> None:
++    bot = request.app["bot"]
++    if not bot:
++        return
++    try:
++        o = get_order(order_id)
++        if not o:
++            return
++        who = "Admin" if actor_role == "owner" else "Customer"
++        await bot.send_message(
++            chat_id=OWNER_ID,
++            text=f"âœï¸ *Order #{order_id} diedit oleh {who}.* Struk baru otomatis dicetak ulang.",
++            parse_mode="Markdown",
++            reply_to_message_id=o.get("admin_msg_id"),
++        )
++        if o.get("admin_msg_id"):
++            await bot.edit_message_text(
++                chat_id=OWNER_ID,
++                message_id=o["admin_msg_id"],
++                text=_order_text(o),
++                parse_mode="Markdown",
++                reply_markup=_order_keyboard(o["id"], o["status"], o["payment_status"]),
++            )
++    except Exception:
++        log.exception("gagal notif owner soal edit order #%s", order_id)
++
++
+ # â”€â”€ Realtime (WebSocket kanban) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ 
+ _ws_clients: set[web.WebSocketResponse] = set()
+diff --git a/state_machine.py b/state_machine.py
+index 5c664e2..07b8908 100644
+--- a/state_machine.py
++++ b/state_machine.py
+@@ -31,12 +31,26 @@ STATUS_LABEL: dict[str, str] = {
+ 
+ CANCEL_REASONS = ["Stok habis", "Request customer", "Kesalahan input", "Lainnya"]
+ 
++# Order cuma bisa diedit (tambah/kurangi qty/hapus/replace item) selagi status
++# masih di kolom ini. "Siap" dan "Selesai" TERKUNCI â€” dicek di sini (backend),
++# bukan cuma disembunyikan di UI, supaya request edit yang nyelonong lewat API
++# langsung ditolak juga (lihat order_edit.edit_order).
++EDITABLE_STATUSES = {"Diterima", "Diproses"}
++
+ 
+ def customer_can_cancel(status: str, payment_status: str) -> bool:
+     """Customer hanya boleh cancel selagi Diterima."""
+     return status == "Diterima"
+ 
+ 
++def customer_can_edit(status: str, payment_status: str) -> bool:
++    """Customer ATAU admin (fallback) boleh edit order selagi status masih
++    Diterima/Diproses DAN belum PAID. Dipakai server.py buat quick-check dan
++    di-expose ke response get_order() (field `editable`) biar frontend bisa
++    lock tombol edit tanpa nebak-nebak logic sendiri."""
++    return status in EDITABLE_STATUSES and payment_status != "PAID"
++
++
+ def get_cancel_warning(payment_status: str) -> str | None:
+     """Warning informational (bukan blocker) kalau order sudah PAID."""
+     if payment_status == "PAID":
+@@ -55,6 +69,7 @@ def get_order(order_id: int) -> dict | None:
+     order = dict(row)
+     order["items"] = [dict(i) for i in items]
+     order["status_label"] = STATUS_LABEL.get(order["status"], order["status"])
++    order["editable"] = customer_can_edit(order["status"], order["payment_status"])
+     return order
+ 
+ 
+@@ -110,6 +125,7 @@ def get_active_orders() -> list[dict]:
+         d = dict(o)
+         d["items"] = items_by_order.get(d["id"], [])
+         d["status_label"] = STATUS_LABEL.get(d["status"], d["status"])
++        d["editable"] = customer_can_edit(d["status"], d["payment_status"])
+         result.append(d)
+     return result
+ 
+diff --git a/webapp/admin.css b/webapp/admin.css
+index 71c84e6..aebd4b4 100644
+--- a/webapp/admin.css
++++ b/webapp/admin.css
+@@ -288,3 +288,30 @@ html, body {
+   cursor: pointer;
+ }
+ .btn-reason:active { opacity: .75; }
++
++/* â”€â”€ Edit Order (fallback admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
++.edit-items-list { margin: 10px 0; }
++.edit-item-row {
++  display: flex; align-items: center; justify-content: space-between;
++  gap: 10px; padding: 8px 0;
++  border-bottom: 1px solid var(--line);
++}
++.edit-item-info { flex: 1; min-width: 0; font-size: 13px; }
++.edit-item-row .qty-control {
++  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
++}
++.edit-item-row .qty-btn {
++  width: 26px; height: 26px; border-radius: 8px;
++  background: var(--card2); color: var(--text);
++  border: 1px solid var(--line); cursor: pointer; font-size: 14px; font-weight: 700;
++}
++.edit-item-row .qty-btn:active { opacity: .7; }
++.edit-item-row .qty-num { min-width: 16px; text-align: center; font-weight: 700; font-size: 13px; }
++.edit-add-row {
++  display: flex; gap: 8px; margin-top: 12px;
++}
++.edit-add-row select {
++  flex: 1; padding: 9px 10px; border-radius: 10px;
++  background: var(--card2); color: var(--text);
++  border: 1px solid var(--line); font-size: 13px;
++}
+diff --git a/webapp/admin.js b/webapp/admin.js
+index 32561e4..bc0695d 100644
+--- a/webapp/admin.js
++++ b/webapp/admin.js
+@@ -189,6 +189,12 @@ function renderDetail() {
+   if (o.status !== "Dibatalkan") {
+     actionButtons.push(`<button class="btn-action danger" id="btn-force-cancel">ðŸš« Force Cancel</button>`);
+   }
++  // Fallback admin: dipakai kalau customer minta edit lewat chat manual.
++  // Sama seperti tombol di app customer, ini cuma shortcut UI â€” backend tetap
++  // final-check status/payment_status ulang saat Simpan (order_edit.edit_order).
++  if (o.editable) {
++    actionButtons.push(`<button class="btn-action secondary" id="btn-edit-order">âœï¸ Edit Order</button>`);
++  }
+ 
+   document.getElementById("detail-body").innerHTML = `
+     <div class="detail-row"><span>Customer</span><span>${escapeHtml(o.full_name || o.username || o.user_id)}</span></div>
+@@ -221,6 +227,7 @@ function renderDetail() {
+ 
+   document.getElementById("btn-force-cancel")?.addEventListener("click", () => renderCancelReasons(o));
+   document.getElementById("btn-chat-open")?.addEventListener("click", () => renderChatCompose(o));
++  document.getElementById("btn-edit-order")?.addEventListener("click", () => renderEditOrder(o));
+ }
+ 
+ function renderChatCompose(o) {
+@@ -276,6 +283,147 @@ function renderCancelReasons(o) {
+   document.getElementById("btn-cancel-back")?.addEventListener("click", renderDetail);
+ }
+ 
++/* â”€â”€ Edit Order (fallback admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++   Dipakai kalau customer minta edit lewat chat manual. Beda dari app
++   customer: TIDAK ada picker modifier di sini (biar gak perlu bangun ulang
++   UI browsing-menu di kanban) â€” item BARU yang ditambah admin harus item
++   plain (tanpa varian). Item lama yang punya varian dibawa sebagai
++   "carry-over" (cuma qty yang bisa diubah), sama seperti di app customer,
++   karena group_id/option_id aslinya memang tidak disimpan lagi setelah
++   checkout (lihat komentar di order_edit.py). */
++let menuFlat = null;   // [{id, name, price, category, available, has_modifiers}], fetch sekali
++let editCart = {};     // { key: {name, unitPrice, qty, carryOverId?, itemId?, modifiersLabel?} }
++
++async function _ensureMenuLoaded() {
++  if (menuFlat) return menuFlat;
++  const result = await api("/api/menu");
++  menuFlat = Object.values(result.categories || {}).flat();
++  return menuFlat;
++}
++
++function _editCartFromOrder(o) {
++  const map = {};
++  (o.items || []).forEach(i => {
++    if (i.modifiers_json) {
++      let label = "";
++      try {
++        label = JSON.parse(i.modifiers_json).map(m => m.option_name).join(", ");
++      } catch { /* biarkan kosong kalau JSON gak valid */ }
++      map[`oi:${i.id}`] = { name: i.item_name, unitPrice: i.unit_price, qty: i.qty, carryOverId: i.id, modifiersLabel: label };
++    } else {
++      map[`item:${i.item_id}`] = { name: i.item_name, unitPrice: i.unit_price, qty: i.qty, itemId: i.item_id };
++    }
++  });
++  return map;
++}
++
++function _editCartTotal() {
++  return Object.values(editCart).reduce((s, e) => s + e.unitPrice * e.qty, 0);
++}
++
++function _editRowHtml(key, e) {
++  const lockedHint = e.carryOverId
++    ? `<div class="detail-item-note">ðŸ§© ${escapeHtml(e.modifiersLabel || "")} â€” varian terkunci, cuma qty yang bisa diubah</div>`
++    : "";
++  return `
++    <div class="edit-item-row" data-key="${key}">
++      <div class="edit-item-info">
++        <div>${escapeHtml(e.name)}</div>
++        ${lockedHint}
++        <div class="detail-item-note">${riel(e.unitPrice)} Ã— ${e.qty} = ${riel(e.unitPrice * e.qty)}</div>
++      </div>
++      <div class="qty-control">
++        <button class="qty-btn minus" data-key="${key}">âˆ’</button>
++        <span class="qty-num">${e.qty}</span>
++        <button class="qty-btn plus" data-key="${key}">+</button>
++      </div>
++    </div>`;
++}
++
++async function renderEditOrder(o) {
++  await _ensureMenuLoaded();
++  editCart = _editCartFromOrder(o);
++  _renderEditOrderBody(o);
++}
++
++function _renderEditOrderBody(o) {
++  const entries = Object.entries(editCart);
++  const rows = entries.length
++    ? entries.map(([k, e]) => _editRowHtml(k, e)).join("")
++    : `<div class="column-empty">Order kosong â€” tambah item dulu di bawah</div>`;
++
++  const addOptions = (menuFlat || [])
++    .filter(m => m.available && !m.has_modifiers)
++    .map(m => `<option value="${m.id}">${escapeHtml(m.name)} â€” ${riel(m.price)}</option>`)
++    .join("");
++
++  document.getElementById("detail-body").innerHTML = `
++    <div class="detail-note">Edit Order #${o.id} â€” tambah/kurangi/hapus item. Perubahan otomatis renotif kanban & cetak ulang struk.</div>
++    <div class="edit-items-list">${rows}</div>
++    <div class="edit-add-row">
++      <select id="edit-add-select">
++        <option value="">+ Tambah item...</option>
++        ${addOptions}
++      </select>
++      <button class="btn-action secondary" id="btn-edit-add">Tambah</button>
++    </div>
++    <div class="detail-row detail-total"><span>Total</span><span>${riel(_editCartTotal())}</span></div>
++    <div class="action-row">
++      <button class="btn-action" id="btn-edit-save">ðŸ’¾ Simpan Perubahan</button>
++      <button class="btn-action secondary" id="btn-edit-back">Â« Batal</button>
++    </div>
++    <div class="detail-note">â„¹ï¸ Item ber-varian (ðŸ§©) cuma bisa diubah jumlahnya di sini. Buat ganti varian atau nambah item baru yang punya pilihan varian, arahkan customer edit sendiri lewat app.</div>
++  `;
++
++  document.querySelectorAll("#detail-body .edit-item-row .qty-btn").forEach(btn => {
++    btn.addEventListener("click", () => {
++      const key = btn.dataset.key;
++      if (btn.classList.contains("plus")) {
++        editCart[key].qty++;
++      } else {
++        editCart[key].qty--;
++        if (editCart[key].qty <= 0) delete editCart[key];
++      }
++      _renderEditOrderBody(o);
++    });
++  });
++
++  document.getElementById("btn-edit-add").addEventListener("click", () => {
++    const select = document.getElementById("edit-add-select");
++    const itemId = parseInt(select.value);
++    if (!itemId) return;
++    const m = (menuFlat || []).find(x => x.id === itemId);
++    if (!m) return;
++    const key = `item:${itemId}`;
++    if (editCart[key]) editCart[key].qty++;
++    else editCart[key] = { name: m.name, unitPrice: m.price, qty: 1, itemId };
++    _renderEditOrderBody(o);
++  });
++
++  document.getElementById("btn-edit-save").addEventListener("click", async () => {
++    const btn = document.getElementById("btn-edit-save");
++    btn.disabled = true;
++    btn.textContent = "Menyimpan...";
++    const items = Object.values(editCart).map(e =>
++      e.carryOverId ? { order_item_id: e.carryOverId, qty: e.qty } : { item_id: e.itemId, qty: e.qty }
++    );
++    const r = await api(`/api/orders/${o.id}/edit`, {
++      method: "POST",
++      body: JSON.stringify({ items }),
++    });
++    if (r.ok) {
++      tg?.HapticFeedback?.notificationOccurred("success");
++      closeDetail();
++    } else {
++      tg?.showAlert?.(r.error || "Gagal menyimpan perubahan.");
++      btn.disabled = false;
++      btn.textContent = "ðŸ’¾ Simpan Perubahan";
++    }
++  });
++
++  document.getElementById("btn-edit-back")?.addEventListener("click", renderDetail);
++}
++
+ document.getElementById("btn-detail-close").addEventListener("click", closeDetail);
+ document.getElementById("detail-overlay").addEventListener("click", e => {
+   if (e.target.id === "detail-overlay") closeDetail();
+diff --git a/webapp/app.js b/webapp/app.js
+index 6178138..8b81175 100644
+--- a/webapp/app.js
++++ b/webapp/app.js
+@@ -11,6 +11,12 @@ let addressTiers = { tiers: {}, default: 0 };  // minimal order per alamat, dari
+ let minOrder = 0;      // ambang minimal order (riel) buat alamat yang lagi dipilih
+ let selectedDeliveryType = "internal";  // 'internal' | 'express'
+ 
++/* Mode Edit Order: dipakai bareng screen-cart yang sama (bukan screen baru),
++   biar reuse renderCart/menu-picker/customize yang sudah ada. Saat non-null,
++   `cart` isinya item-item order yang lagi diedit (bukan keranjang belanja baru). */
++let editingOrderId = null;
++let _cartBackup = null;  // snapshot cart asli sebelum masuk mode edit, dikembalikan pas keluar
++
+ /* â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+ const escapeAttr = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+ 
+@@ -382,30 +388,36 @@ document.getElementById("cart-items").addEventListener("input", e => {
+   cart[key].note = input.value;
+ });
+ 
+-function renderCart() {
+-  const container = document.getElementById("cart-items");
+-  const entries = Object.entries(cart);
+-
+-  if (!entries.length) {
+-    container.innerHTML = `<div class="empty-cart">ðŸ›’ Keranjang kosong</div>`;
+-  } else {
+-    container.innerHTML = entries.map(([key, { item, qty, note, modifiers }]) => {
+-      const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
+-      const unitPrice = item.price + delta;
+-      const modsText = (modifiers || []).map(m => m.option_name).join(", ");
+-      const emoji = item.emoji || "â˜•";
+-      const visual = item.image_url
+-        ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy"
+-               onload="this.nextElementSibling.style.display='none'"
+-               onerror="this.style.display='none'" />
+-           <span class="cart-emoji-fallback">${emoji}</span>`
+-        : emoji;
+-      return `
++function cartItemHtml(key, entry) {
++  const { item, qty, note, modifiers, carryOverId, modifiersLabel } = entry;
++  const delta = (modifiers || []).reduce((d, m) => d + m.price_delta, 0);
++  const unitPrice = item.price + delta;
++  const modsText = carryOverId ? (modifiersLabel || "") : (modifiers || []).map(m => m.option_name).join(", ");
++  const emoji = item.emoji || "â˜•";
++  const visual = item.image_url
++    ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy"
++           onload="this.nextElementSibling.style.display='none'"
++           onerror="this.style.display='none'" />
++       <span class="cart-emoji-fallback">${emoji}</span>`
++    : emoji;
++  // Item carry-over (punya modifier/varian dari order lama): group_id/option_id
++  // aslinya TIDAK disimpan lagi setelah checkout (order_items cuma nyimpen nama
++  // buat ditampilkan), jadi gak bisa direkonstruksi buat kirim ulang ke backend.
++  // Qty tetap boleh diubah/dihapus, tapi note & varian dikunci di sini â€” kalau
++  // mau ganti variannya, hapus baris ini lalu tambah ulang lewat menu.
++  const lockedHint = carryOverId
++    ? `<div class="cart-item-locked-hint">ðŸ§© Varian terkunci di sini â€” cuma jumlah yang bisa diubah. Mau ganti varian? Hapus lalu tambah ulang dari menu.</div>`
++    : "";
++  const noteInput = carryOverId ? "" : `
++        <input type="text" class="cart-item-note-input" data-key="${key}"
++               placeholder="+ catatan untuk item ini (opsional)"
++               value="${escapeAttr(note || "")}" maxlength="200" />`;
++  return `
+       <div class="cart-item">
+         <div class="cart-item-row">
+           <span class="cart-emoji">${visual}</span>
+           <div class="cart-item-info">
+-            <div class="cart-item-name">${item.name}</div>
++            <div class="cart-item-name">${escapeHtml(item.name)}</div>
+             ${modsText ? `<div class="cart-item-mods">${escapeHtml(modsText)}</div>` : ""}
+             <div class="cart-item-price">${riel(unitPrice)} Ã— ${qty} = <strong>${riel(unitPrice * qty)}</strong></div>
+           </div>
+@@ -415,14 +427,27 @@ function renderCart() {
+             <button class="qty-btn plus" data-key="${key}">+</button>
+           </div>
+         </div>
+-        <input type="text" class="cart-item-note-input" data-key="${key}"
+-               placeholder="+ catatan untuk item ini (opsional)"
+-               value="${escapeAttr(note || "")}" maxlength="200" />
++        ${lockedHint}
++        ${noteInput}
+       </div>`;
+-    }).join("");
++}
++
++function renderCart() {
++  const container = document.getElementById("cart-items");
++  const entries = Object.entries(cart);
++
++  if (!entries.length) {
++    container.innerHTML = `<div class="empty-cart">ðŸ›’ Keranjang kosong</div>`;
++  } else {
++    container.innerHTML = entries.map(([key, entry]) => cartItemHtml(key, entry)).join("");
+   }
+ 
+   updatePriceSummary();
++
++  if (editingOrderId) {
++    document.getElementById("btn-edit-save").disabled = !entries.length;
++    return;
++  }
+   const empty = !entries.length;
+   const belowMin = minOrder > 0 && cartSubtotal() < minOrder;
+   const expressBlocksCash = selectedDeliveryType === "express";
+@@ -434,7 +459,7 @@ function renderCart() {
+ function updatePriceSummary() {
+   const sub = cartSubtotal();
+   document.getElementById("sum-total").textContent = riel(sub);
+-  const belowMin = minOrder > 0 && sub < minOrder && sub > 0;
++  const belowMin = !editingOrderId && minOrder > 0 && sub < minOrder && sub > 0;
+   const warning = document.getElementById("min-order-warning");
+   warning.classList.toggle("hidden", !belowMin);
+   if (belowMin) {
+@@ -572,6 +597,109 @@ function clearCart() {
+   updateCartFab();
+ }
+ 
++/* â”€â”€ Edit Order (partial edit) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
++   Reuse screen-cart yang sama persis dipakai buat checkout baru â€” cuma
++   `cart` di-isi dari isi order yang sedang diedit, dan footer diganti dari
++   "pilih metode bayar" jadi "Simpan/Batal". Item yang punya modifier/varian
++   dibawa sebagai entry "carry-over" (key berawalan "oi:") karena backend
++   tidak menyimpan ulang group_id/option_id aslinya â€” cuma qty yang bisa
++   diubah buat entry jenis ini (lihat cartItemHtml). */
++
++function _findLiveMenuItem(itemId) {
++  return Object.values(menu).flat().find(m => m.id === itemId);
++}
++
++function startEditOrder(order) {
++  stopPolling();
++  _cartBackup = JSON.parse(JSON.stringify(cart));
++  Object.keys(cart).forEach(k => delete cart[k]);
++  editingOrderId = order.id;
++
++  order.items.forEach(i => {
++    if (i.modifiers_json) {
++      let modifiersLabel = "";
++      try {
++        modifiersLabel = JSON.parse(i.modifiers_json).map(m => m.option_name).join(", ");
++      } catch { /* biarkan kosong kalau JSON gak valid */ }
++      cart[`oi:${i.id}`] = {
++        item: { id: i.item_id, name: i.item_name, price: i.unit_price, emoji: "ðŸ§©" },
++        qty: i.qty,
++        carryOverId: i.id,
++        modifiersLabel,
++      };
++    } else {
++      // Pakai harga LIVE dari menu kalau produknya masih ada, biar preview harga
++      // konsisten dengan yang bakal di-resolve ulang backend pas Simpan. Kalau
++      // produk sudah dihapus dari menu, fallback ke snapshot lama (tetap bisa
++      // dikurangi/dihapus meski gak bisa "ditambah" lagi qty-nya kalau habis).
++      const live = _findLiveMenuItem(i.item_id);
++      cart[String(i.item_id)] = {
++        item: live || { id: i.item_id, name: i.item_name, price: i.unit_price, emoji: "ðŸ½ï¸", available: 0 },
++        qty: i.qty,
++        note: i.item_note || "",
++      };
++    }
++  });
++
++  document.getElementById("cart-title").textContent = `Edit Order #${order.id}`;
++  document.getElementById("cart-footer-normal").classList.add("hidden");
++  document.getElementById("pay-method-row").classList.add("hidden");
++  document.getElementById("edit-actions-row").classList.remove("hidden");
++  renderCart();
++  show("screen-cart");
++}
++
++function exitEditMode() {
++  editingOrderId = null;
++  Object.keys(cart).forEach(k => delete cart[k]);
++  if (_cartBackup) {
++    Object.assign(cart, _cartBackup);
++    _cartBackup = null;
++  }
++  document.getElementById("cart-title").textContent = "Keranjang";
++  document.getElementById("cart-footer-normal").classList.remove("hidden");
++  document.getElementById("pay-method-row").classList.remove("hidden");
++  document.getElementById("edit-actions-row").classList.add("hidden");
++  updateCartFab();
++}
++
++document.getElementById("btn-edit-cancel").addEventListener("click", () => {
++  const oid = editingOrderId;
++  exitEditMode();
++  loadOrderDetail(oid);
++});
++
++document.getElementById("btn-edit-save").addEventListener("click", async () => {
++  const btn = document.getElementById("btn-edit-save");
++  btn.disabled = true;
++  btn.textContent = "Menyimpan...";
++
++  const items = Object.values(cart).map(({ item, qty, note, modifiers, carryOverId }) => {
++    if (carryOverId) return { order_item_id: carryOverId, qty };
++    const entry = { item_id: item.id, qty, note: (note || "").trim() };
++    if (modifiers?.length) {
++      entry.modifiers = modifiers.map(m => ({ group_id: m.group_id, option_id: m.option_id }));
++    }
++    return entry;
++  });
++
++  const oid = editingOrderId;
++  const result = await api(`/api/orders/${oid}/edit`, {
++    method: "POST",
++    body: JSON.stringify({ items }),
++  });
++
++  if (result.ok) {
++    tg?.HapticFeedback?.notificationOccurred("success");
++    exitEditMode();
++    loadOrderDetail(oid);
++  } else {
++    tg?.showAlert?.(result.error || "Gagal menyimpan perubahan.");
++    btn.disabled = false;
++    btn.textContent = "ðŸ’¾ Simpan Perubahan";
++  }
++});
++
+ /* â”€â”€ Success screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+ function showSuccess(result) {
+   document.getElementById("success-order-id").textContent = "#" + result.order_id;
+@@ -663,6 +791,14 @@ async function _fetchOrderDetail(id) {
+     ? `<button id="btn-change-method" class="btn-change-method">ðŸ”„ Ganti Metode Bayar (${o.payment_method || "CASH"})</button>`
+     : "";
+ 
++  // `o.editable` dihitung backend (Diterima/Diproses DAN belum PAID) â€” tombol
++  // ini cuma shortcut UI, penolakan yang sesungguhnya tetap dicek ulang di
++  // server saat Simpan (lihat order_edit.edit_order), jadi aman walau status
++  // order berubah persis di antara render ini dan klik Simpan.
++  const editHtml = o.editable
++    ? `<button id="btn-edit-order" class="btn-change-method">âœï¸ Edit Order</button>`
++    : "";
++
+   body.innerHTML = `
+     <div class="detail-status-big">${o.status_label}</div>
+     <div class="detail-items">
+@@ -676,9 +812,14 @@ async function _fetchOrderDetail(id) {
+       ${payHtml}
+       ${o.note ? `<div class="detail-note">ðŸ“ ${escapeHtml(o.note)}</div>` : ""}
+     </div>
++    ${editHtml}
+     ${changeMethodHtml}
+     ${cancelHtml}`;
+ 
++  document.getElementById("btn-edit-order")?.addEventListener("click", () => {
++    startEditOrder(o);
++  });
++
+   document.getElementById("btn-cancel-order")?.addEventListener("click", () => {
+     const doCancel = async () => {
+       const r = await api(`/api/orders/${id}/cancel`, { method: "POST" });
+diff --git a/webapp/index.html b/webapp/index.html
+index c19ca00..d34466d 100644
+--- a/webapp/index.html
++++ b/webapp/index.html
+@@ -40,7 +40,7 @@
+ <div id="screen-cart" class="screen">
+   <div class="topbar">
+     <button class="icon-btn back-btn" data-target="screen-menu">â€¹</button>
+-    <span class="topbar-title">Keranjang</span>
++    <span class="topbar-title" id="cart-title">Keranjang</span>
+   </div>
+   <div class="cart-scroll">
+   <div id="cart-items" class="cart-list"></div>
+@@ -49,40 +49,42 @@
+   </div>
+   <div class="cart-footer">
+ 
+-    <div class="address-section">
+-      <div class="addr-row">
+-        <span class="addr-label-inline">ðŸ“ Tujuan:</span>
+-        <button id="btn-addr-pick" class="btn-addr-pick">KD â–¾</button>
+-      </div>
+-      <div class="addr-picker hidden" id="addr-picker">
+-        <div class="address-chips">
+-          <button class="addr-chip active" data-addr="KD">KD</button>
+-          <button class="addr-chip" data-addr="Hp Tower">Hp Tower</button>
+-          <button class="addr-chip" data-addr="WON">WON</button>
+-          <button class="addr-chip" data-addr="The Rich">The Rich</button>
+-          <button class="addr-chip" data-addr="Hp Avenue">Hp Avenue</button>
+-          <button class="addr-chip" data-addr="TM">TM</button>
++    <div id="cart-footer-normal">
++      <div class="address-section">
++        <div class="addr-row">
++          <span class="addr-label-inline">ðŸ“ Tujuan:</span>
++          <button id="btn-addr-pick" class="btn-addr-pick">KD â–¾</button>
++        </div>
++        <div class="addr-picker hidden" id="addr-picker">
++          <div class="address-chips">
++            <button class="addr-chip active" data-addr="KD">KD</button>
++            <button class="addr-chip" data-addr="Hp Tower">Hp Tower</button>
++            <button class="addr-chip" data-addr="WON">WON</button>
++            <button class="addr-chip" data-addr="The Rich">The Rich</button>
++            <button class="addr-chip" data-addr="Hp Avenue">Hp Avenue</button>
++            <button class="addr-chip" data-addr="TM">TM</button>
++          </div>
++          <input id="addr-custom" class="addr-input" type="text" placeholder="Alamat lain (jarang diantar)..." />
+         </div>
+-        <input id="addr-custom" class="addr-input" type="text" placeholder="Alamat lain (jarang diantar)..." />
+       </div>
+-    </div>
+ 
+-    <div class="delivery-section">
+-      <div class="delivery-label">ðŸšš Metode Antar:</div>
+-      <div class="delivery-method-row">
+-        <button id="btn-delivery-internal" class="btn-delivery-method active" data-type="internal">ðŸš´ Kurir Internal Â· Gratis</button>
+-        <button id="btn-delivery-express" class="btn-delivery-method" data-type="express">ðŸš€ Kurir Express Â· Estimasi <span id="express-fee-amount">-</span></button>
+-      </div>
+-      <div id="delivery-express-note" class="delivery-express-note hidden">
+-        ðŸ’° Ongkos Kurir Express dibayar <strong>cash langsung ke kurir</strong> saat barang sampai (di luar pembayaran order ini).
+-      </div>
+-      <div id="delivery-express-cash-warning" class="delivery-warning hidden">
+-        âš ï¸ Kurir Express hanya tersedia untuk pembayaran ABA/Transfer.
++      <div class="delivery-section">
++        <div class="delivery-label">ðŸšš Metode Antar:</div>
++        <div class="delivery-method-row">
++          <button id="btn-delivery-internal" class="btn-delivery-method active" data-type="internal">ðŸš´ Kurir Internal Â· Gratis</button>
++          <button id="btn-delivery-express" class="btn-delivery-method" data-type="express">ðŸš€ Kurir Express Â· Estimasi <span id="express-fee-amount">-</span></button>
++        </div>
++        <div id="delivery-express-note" class="delivery-express-note hidden">
++          ðŸ’° Ongkos Kurir Express dibayar <strong>cash langsung ke kurir</strong> saat barang sampai (di luar pembayaran order ini).
++        </div>
++        <div id="delivery-express-cash-warning" class="delivery-warning hidden">
++          âš ï¸ Kurir Express hanya tersedia untuk pembayaran ABA/Transfer.
++        </div>
+       </div>
+-    </div>
+ 
+-    <div class="note-row">
+-      <textarea id="note-input" placeholder="Catatan untuk dapur (opsional)" rows="2"></textarea>
++      <div class="note-row">
++        <textarea id="note-input" placeholder="Catatan untuk dapur (opsional)" rows="2"></textarea>
++      </div>
+     </div>
+ 
+     <div class="price-summary">
+@@ -90,10 +92,15 @@
+       <div id="min-order-warning" class="min-order-warning hidden"></div>
+     </div>
+ 
+-    <div class="pay-method-row">
++    <div id="pay-method-row" class="pay-method-row">
+       <button id="btn-pay-cash" class="btn-pay-method">ðŸ’µ Cash</button>
+       <button id="btn-pay-aba" class="btn-pay-method aba">ðŸ¦ ABA</button>
+     </div>
++
++    <div id="edit-actions-row" class="pay-method-row hidden">
++      <button id="btn-edit-cancel" class="btn-pay-method">âœ• Batal</button>
++      <button id="btn-edit-save" class="btn-pay-method aba">ðŸ’¾ Simpan Perubahan</button>
++    </div>
+   </div>
+   </div>
+ </div>
+diff --git a/webapp/style.css b/webapp/style.css
+index fe9aadf..6834548 100644
+--- a/webapp/style.css
++++ b/webapp/style.css
+@@ -519,6 +519,11 @@ html, body {
+   box-shadow: var(--glow);
+ }
+ .btn-pay-method.hidden { display: none; }
++#cart-footer-normal.hidden { display: none; }
++.pay-method-row.hidden { display: none; }
++.cart-item-locked-hint {
++  font-size: 11.5px; color: var(--hint); font-style: italic;
++}
+ 
+ /* â”€â”€ Product customize â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+ .customize-body 

@@ -18,6 +18,7 @@ from checkout_flow import checkout, verify_init_data
 from config import BOT_USERNAME, OWNER_ID, PRINTER_AGENT_TOKEN
 from db import get_conn, get_setting
 from geo import ADDRESS_MIN_ORDER, DEFAULT_ADDRESS_MIN_ORDER
+from order_edit import edit_order
 from owner_console import _order_keyboard, _order_text, cancel_notif_text
 from printing import (
     create_print_job,
@@ -436,6 +437,80 @@ async def _notify_owner_payment_method_change(request: web.Request, order_id: in
             )
     except Exception:
         log.exception("gagal notif ganti metode ke owner")
+
+
+# ── Edit Order (partial edit) ──────────────────────────────────────────────────
+# Dibuka HANYA di status Diterima/Diproses (dicek final di edit_order(), bukan
+# cuma dikunci di UI). Endpoint yang sama dipakai baik oleh customer (jalur
+# utama) MAUPUN owner (fallback kalau customer minta edit lewat chat manual) —
+# otorisasinya reuse _forbidden_for_order() yang sudah ada, sama seperti pola
+# cancel & payment-method di atas.
+
+@routes.post("/api/orders/{order_id}/edit")
+async def api_edit_order(request):
+    user, err = _require_user(request)
+    if err:
+        return err
+    oid = int(request.match_info["order_id"])
+    o = get_order(oid)
+    if not o:
+        return _json({"ok": False, "error": "Tidak ditemukan"}, 404)
+    err = _forbidden_for_order(user, o)
+    if err:
+        return err
+
+    actor_role = "owner" if user["id"] == OWNER_ID else "customer"
+    try:
+        body = await request.json()
+        result = edit_order(
+            order_id=oid,
+            actor_id=user["id"],
+            actor_role=actor_role,
+            items=body.get("items", []),
+            note=body.get("note"),
+        )
+    except Exception:
+        # Sengaja dibungkus try/except di sini (sama seperti pola api_checkout) —
+        # kalau ada input malformed yang lolos dari validasi di edit_order() dan
+        # bikin exception gak terduga, kita tetap balikin JSON error yang rapi,
+        # bukan 500 HTML generic dari aiohttp yang bikin _fetchOrderDetail/doSaveEdit
+        # di FE gagal parse response-nya.
+        log.exception("edit order error, order #%s", oid)
+        return _json({"ok": False, "error": "Server error, coba lagi ya."}, 500)
+
+    if result.get("ok"):
+        await broadcast_order_update(oid)
+        await _notify_owner_order_edited(request, oid, actor_role)
+        # Reprint struk lewat flow print yang sudah ada (print_jobs + push ke agent)
+        await push_print_job(oid)
+    return _result_json(result)
+
+
+async def _notify_owner_order_edited(request: web.Request, order_id: int, actor_role: str) -> None:
+    bot = request.app["bot"]
+    if not bot:
+        return
+    try:
+        o = get_order(order_id)
+        if not o:
+            return
+        who = "Admin" if actor_role == "owner" else "Customer"
+        await bot.send_message(
+            chat_id=OWNER_ID,
+            text=f"✏️ *Order #{order_id} diedit oleh {who}.* Struk baru otomatis dicetak ulang.",
+            parse_mode="Markdown",
+            reply_to_message_id=o.get("admin_msg_id"),
+        )
+        if o.get("admin_msg_id"):
+            await bot.edit_message_text(
+                chat_id=OWNER_ID,
+                message_id=o["admin_msg_id"],
+                text=_order_text(o),
+                parse_mode="Markdown",
+                reply_markup=_order_keyboard(o["id"], o["status"], o["payment_status"]),
+            )
+    except Exception:
+        log.exception("gagal notif owner soal edit order #%s", order_id)
 
 
 # ── Realtime (WebSocket kanban) ────────────────────────────────────────────────

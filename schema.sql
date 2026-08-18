@@ -112,3 +112,20 @@ CREATE TABLE IF NOT EXISTS modifier_options (
     is_available INTEGER NOT NULL DEFAULT 1,  -- konvensi sama dengan menu_items.available
     FOREIGN KEY (group_id) REFERENCES modifier_groups(id)
 );
+
+-- Audit trail fitur Edit Order (partial edit). Satu baris per aksi edit sukses,
+-- nyimpen snapshot isi order_items SEBELUM diubah — buat jejak kalau ada dispute
+-- customer vs kasir ("lho tadi pesenannya bukan ini"). Tabel baru murni (bukan
+-- ALTER kolom existing), jadi cukup CREATE TABLE IF NOT EXISTS di sini, aman
+-- dijalankan ulang lewat init_db() baik buat instalasi baru maupun DB lama.
+CREATE TABLE IF NOT EXISTS order_edits (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id             INTEGER NOT NULL,
+    actor_user_id        INTEGER NOT NULL,   -- customer user_id ATAU OWNER_ID
+    actor_role           TEXT    NOT NULL,   -- 'customer' | 'owner'
+    old_subtotal         INTEGER NOT NULL,
+    new_subtotal         INTEGER NOT NULL,
+    items_snapshot_json  TEXT    NOT NULL,   -- isi order_items SEBELUM diedit (JSON)
+    created_at           TEXT    DEFAULT (datetime('now')),  -- UTC
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);

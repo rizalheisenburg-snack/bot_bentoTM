@@ -31,10 +31,24 @@ STATUS_LABEL: dict[str, str] = {
 
 CANCEL_REASONS = ["Stok habis", "Request customer", "Kesalahan input", "Lainnya"]
 
+# Order cuma bisa diedit (tambah/kurangi qty/hapus/replace item) selagi status
+# masih di kolom ini. "Siap" dan "Selesai" TERKUNCI — dicek di sini (backend),
+# bukan cuma disembunyikan di UI, supaya request edit yang nyelonong lewat API
+# langsung ditolak juga (lihat order_edit.edit_order).
+EDITABLE_STATUSES = {"Diterima", "Diproses"}
+
 
 def customer_can_cancel(status: str, payment_status: str) -> bool:
     """Customer hanya boleh cancel selagi Diterima."""
     return status == "Diterima"
+
+
+def customer_can_edit(status: str, payment_status: str) -> bool:
+    """Customer ATAU admin (fallback) boleh edit order selagi status masih
+    Diterima/Diproses DAN belum PAID. Dipakai server.py buat quick-check dan
+    di-expose ke response get_order() (field `editable`) biar frontend bisa
+    lock tombol edit tanpa nebak-nebak logic sendiri."""
+    return status in EDITABLE_STATUSES and payment_status != "PAID"
 
 
 def get_cancel_warning(payment_status: str) -> str | None:
@@ -55,6 +69,7 @@ def get_order(order_id: int) -> dict | None:
     order = dict(row)
     order["items"] = [dict(i) for i in items]
     order["status_label"] = STATUS_LABEL.get(order["status"], order["status"])
+    order["editable"] = customer_can_edit(order["status"], order["payment_status"])
     return order
 
 
@@ -110,6 +125,7 @@ def get_active_orders() -> list[dict]:
         d = dict(o)
         d["items"] = items_by_order.get(d["id"], [])
         d["status_label"] = STATUS_LABEL.get(d["status"], d["status"])
+        d["editable"] = customer_can_edit(d["status"], d["payment_status"])
         result.append(d)
     return result
 

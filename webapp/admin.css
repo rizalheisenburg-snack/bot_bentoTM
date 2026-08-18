@@ -288,3 +288,30 @@ html, body {
   cursor: pointer;
 }
 .btn-reason:active { opacity: .75; }
+
+/* ── Edit Order (fallback admin) ──────────────────────────── */
+.edit-items-list { margin: 10px 0; }
+.edit-item-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.edit-item-info { flex: 1; min-width: 0; font-size: 13px; }
+.edit-item-row .qty-control {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.edit-item-row .qty-btn {
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--card2); color: var(--text);
+  border: 1px solid var(--line); cursor: pointer; font-size: 14px; font-weight: 700;
+}
+.edit-item-row .qty-btn:active { opacity: .7; }
+.edit-item-row .qty-num { min-width: 16px; text-align: center; font-weight: 700; font-size: 13px; }
+.edit-add-row {
+  display: flex; gap: 8px; margin-top: 12px;
+}
+.edit-add-row select {
+  flex: 1; padding: 9px 10px; border-radius: 10px;
+  background: var(--card2); color: var(--text);
+  border: 1px solid var(--line); font-size: 13px;
+}
