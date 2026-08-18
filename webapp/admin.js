@@ -1,6 +1,13 @@
 /* ── Telegram WebApp init ─────────────────────────────────────── */
 /* tg, INIT_DATA, api(), riel(), escapeHtml() ada di common.js (di-load sebelum file ini) */
 tg?.expand();
+// Telegram Desktop buka Mini App di window popup kecil secara default —
+// requestFullscreen() (Bot API 8.0+) bikin dia langsung full-window alih-alih
+// popup kecil yang bikin board kanban kepotong. Client lama (belum support)
+// otomatis tetap fallback ke expand() biasa di atas.
+if (tg?.isVersionAtLeast?.("8.0")) {
+  try { tg.requestFullscreen(); } catch { /* fallback diam-diam ke expand() */ }
+}
 
 /* ── State ────────────────────────────────────────────────────── */
 const STATUSES = ["Diterima", "Diproses", "Siap", "Selesai", "Dibatalkan"];

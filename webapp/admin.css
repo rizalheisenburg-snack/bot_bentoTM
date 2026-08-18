@@ -112,6 +112,15 @@ html, body {
 .column[data-status="Selesai"]    { border-top-color: var(--hint); }
 .column[data-status="Dibatalkan"] { border-top-color: var(--red); }
 
+/* Window sempit (mis. popup Telegram Desktop sebelum di-resize/fullscreen):
+   3+ kolom bertumpuk cuma bikin masing-masing kepotong separuh. Di bawah
+   breakpoint ini, tiap kolom full-lebar-layar dan scroll-snap MANDATORY —
+   jadi persis 1 status per layar, geser via tab (klik) atau swipe langsung. */
+@media (max-width: 700px) {
+  .board { scroll-snap-type: x mandatory; scroll-padding-inline: 14px; }
+  .column { flex: 0 0 100%; min-width: 100%; max-width: 100%; }
+}
+
 .column-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px;
