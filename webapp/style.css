@@ -47,6 +47,7 @@ html, body {
 .screen {
   display: none;
   flex-direction: column;
+  height: 100vh;   /* fallback buat WebView lama yang belum kenal dvh */
   height: 100dvh;
   overflow: hidden;
   max-width: 480px;
@@ -99,6 +100,10 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
+  /* Fullscreen mode (requestFullscreen) di Telegram bisa numpuk overlay
+     tombol close/minimize sendiri di atas — --tg-safe-area-inset-top nutup
+     itu; env(safe-area-inset-top) jaga-jaga buat notch/dynamic island OS. */
+  padding-top: calc(14px + var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)));
   background: rgba(20, 22, 29, .82);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -595,6 +600,7 @@ html, body {
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
 }
 .btn-choose {
