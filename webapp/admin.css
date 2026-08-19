@@ -46,9 +46,12 @@ html, body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px; border-bottom: 1px solid var(--line);
   /* Fullscreen mode (requestFullscreen) di Telegram numpuk overlay
-     tombol close/minimize sendiri di atas — --tg-safe-area-inset-top nutup
-     itu; env(safe-area-inset-top) jaga-jaga buat notch/dynamic island OS. */
-  padding-top: calc(14px + var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)));
+     tombol close/minimize sendiri di atas. --tg-safe-area-inset-top cuma
+     notch/status-bar device (sering 0 di HP tanpa notch — makanya di
+     desktop udah bener tapi di HP masih ketiban); --tg-content-safe-area-
+     -inset-top yang nutup tombol Telegram itu sendiri. env(safe-area-
+     inset-top) jaga-jaga buat notch/dynamic island OS kalau var TG kosong. */
+  padding-top: calc(14px + var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px));
   background: var(--card);
 }
 .topbar-title { font-weight: 800; font-size: 16px; }
