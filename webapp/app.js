@@ -10,6 +10,21 @@ if (tg?.isVersionAtLeast?.("8.0")) {
 tg?.setHeaderColor?.("#14161D");
 tg?.setBackgroundColor?.("#14161D");
 
+// Fullscreen mode numpuk overlay tombol close/judul bawaan Telegram di atas.
+// tg.safeAreaInset = notch/status bar device. tg.contentSafeAreaInset = area
+// yang ketutup UI Telegram sendiri (close btn dkk) pas fullscreen. Keduanya
+// perlu digabung & di-push ke CSS var --tg-safe-area-inset-top biar topbar
+// custom kita gak numpuk sama overlay itu. Nilainya baru pasti begitu event
+// safeAreaChanged/contentSafeAreaChanged nembak (belum tentu ready pas load).
+function syncSafeAreaInsetTop() {
+  const root = document.documentElement.style;
+  root.setProperty("--tg-safe-area-inset-top", (tg?.safeAreaInset?.top || 0) + "px");
+  root.setProperty("--tg-content-safe-area-inset-top", (tg?.contentSafeAreaInset?.top || 0) + "px");
+}
+syncSafeAreaInsetTop();
+tg?.onEvent?.("safeAreaChanged", syncSafeAreaInsetTop);
+tg?.onEvent?.("contentSafeAreaChanged", syncSafeAreaInsetTop);
+
 /* ── State ────────────────────────────────────────────────────── */
 const cart = {};       // { item_id: { item, qty, note } }
 let menu = {};         // { category: [item, ...] }
