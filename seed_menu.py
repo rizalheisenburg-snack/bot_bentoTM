@@ -86,9 +86,18 @@ MENU: list[dict] = [
     {"category": "Roti/Cemilan", "name": "Donat Oreo", "price": 5_000, "image_url": "/img/donatoreo.jpg"},
     {"category": "Roti/Cemilan", "name": "Donat Mocca Misis", "price": 5_000, "image_url": "/img/doant%20moka%20coklat.jpg"},
     {"category": "Roti/Cemilan", "name": "Donat Misis Keju", "price": 5_000, "image_url": "/img/doant%20meses%20keju.jpg"},
+    {"category": "Roti/Cemilan", "name": "Donat Mini", "price": 12_000},
+    {"category": "Roti/Cemilan", "name": "Donat Kacang Coklat", "price": 5_000},
+    {"category": "Roti/Cemilan", "name": "Bomboloni", "price": 10_000},
     {"category": "Roti/Cemilan", "name": "Lidah Kucing", "price": 10_000, "image_url": "/img/lidahkucing.jpg"},
     {"category": "Roti/Cemilan", "name": "Lumpia Pedas", "price": 8_000, "image_url": "/img/lumpiapedaskrispi.jpg"},
     {"category": "Roti/Cemilan", "name": "Tahu Walik", "price": 6_000},
+    {"category": "Roti/Cemilan", "name": "Roti Baso", "price": 5_000},
+    {"category": "Roti/Cemilan", "name": "Roti Coklat Keju", "price": 5_000},
+    {"category": "Roti/Cemilan", "name": "Bolu Chipon Pandan", "price": 5_000},
+    {"category": "Roti/Cemilan", "name": "Muffin Coklat/Keju", "price": 6_000},
+    {"category": "Roti/Cemilan", "name": "Lapis Pepe", "price": 6_000},
+    {"category": "Roti/Cemilan", "name": "Ketan Srikaya", "price": 6_000},
 
     # ── Kerupuk / Keripik ────────────────────────────────────────
     {"category": "Kerupuk/Keripik", "name": "Krupuk Udang", "price": 6_000, "image_url": "/img/kerupuk-udang.jpg"},
@@ -100,6 +109,7 @@ MENU: list[dict] = [
     {"category": "Kerupuk/Keripik", "name": "Emping", "price": 6_000, "image_url": "/img/emping.jpg"},
     {"category": "Kerupuk/Keripik", "name": "Peyek", "price": 6_000, "image_url": "/img/peyek.jpg"},
     {"category": "Kerupuk/Keripik", "name": "Usus Crispy", "price": 8_000, "image_url": "/img/usus-crispy.jpg"},
+    {"category": "Kerupuk/Keripik", "name": "Rengginang", "price": 6_000},
 
     # ── Minuman ───────────────────────────────────────────────────
     {"category": "Minuman", "name": "Mineral Besar", "price": 4_000, "image_url": "/img/mineral-besar.jpg"},
