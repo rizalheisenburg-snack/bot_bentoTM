@@ -55,7 +55,14 @@ html, body {
 }
 .screen.active { display: flex; }
 
+/* Di layar lebar (Telegram Desktop, laptop outlet), 480px kaku bikin
+   app keliatan kartu kecil ngambang. Skalain dikit sampai batas nyaman
+   dibaca (720px) pake clamp, biar gak kekecilan tapi juga gak melar
+   jadi list yang aneh proporsinya. */
 @media (min-width: 481px) {
+  .screen {
+    max-width: clamp(480px, 60vw, 720px);
+  }
   .screen.active {
     box-shadow: 0 0 60px rgba(0, 0, 0, .5);
     border-left: 1px solid var(--line);
@@ -323,7 +330,7 @@ html, body {
   left: 50%;
   transform: translateX(-50%);
   width: calc(100% - 32px);
-  max-width: 448px;
+  max-width: calc(clamp(480px, 60vw, 720px) - 32px);
   background: rgba(29, 33, 44, .88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
