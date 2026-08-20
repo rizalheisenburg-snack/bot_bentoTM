@@ -74,8 +74,6 @@ html, body {
    yang kebuang kalau dikunci selebar HP terus. */
 @media (min-width: 900px) {
   :root { --app-max-width: 1120px; }
-  .section-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
-  .modifier-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
 /* ── Loading ──────────────────────────────────────────────────── */
@@ -239,7 +237,11 @@ html, body {
 }
 .section-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* auto-fill ngatur jumlah kolom sendiri sesuai lebar container — di HP
+     (~448px setelah padding) otomatis kepas 2, makin lebar makin nambah,
+     gak nunggu breakpoint tertentu kayak sebelumnya (itu yang bikin ada
+     "zona mati" 481-899px: shell udah lebar tapi grid masih ketinggalan). */
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 13px;
 }
 
@@ -574,7 +576,7 @@ html, body {
 }
 .modifier-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 10px;
 }
 .modifier-card {
