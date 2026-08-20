@@ -54,6 +54,26 @@ def get_user_min_order(user_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def reset_orders() -> dict:
+    """Hapus SEMUA data transaksi (order, item, edit history, print job, bukti
+    bayar) — menu_items, modifier_groups/options, users, dan settings TIDAK
+    disentuh. Dipakai buat bersihin data test/trial sebelum omzet mulai
+    dihitung serius. ID order di-reset balik ke 1 (AUTOINCREMENT counter).
+    """
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) c FROM orders").fetchone()["c"]
+        conn.execute("DELETE FROM order_edits")
+        conn.execute("DELETE FROM print_jobs")
+        conn.execute("DELETE FROM payment_proofs")
+        conn.execute("DELETE FROM order_items")
+        conn.execute("DELETE FROM orders")
+        conn.execute(
+            "DELETE FROM sqlite_sequence WHERE name IN "
+            "('orders','order_items','order_edits','print_jobs','payment_proofs')"
+        )
+    return {"orders_deleted": count}
+
+
 def init_db() -> None:
     with open("schema.sql") as f:
         sql = f.read()
