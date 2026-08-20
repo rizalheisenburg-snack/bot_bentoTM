@@ -26,7 +26,7 @@ from telegram.ext import (
 )
 
 from config import BOT_TOKEN, CAFE_LAT, CAFE_LON, OWNER_ID, WEBAPP_URL
-from db import get_conn, get_setting, set_setting, set_user_min_order
+from db import get_conn, get_setting, set_setting, set_user_min_order, reset_orders
 from geo import get_min_order, haversine
 from state_machine import (
     CANCEL_REASONS,
@@ -199,7 +199,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/buka — buka warung \\(terima order\\)\n"
         "/tutup — tutup warung \\(blok checkout\\)\n"
         "/push \\<user\\_id\\> \\[pesan\\] — kirim promo ke user\n"
-        "/admin — buka Kanban order",
+        "/admin — buka Kanban order\n"
+        "/resetorders — hapus semua data order \\(buat bersih\\-bersih trial\\)",
         parse_mode="MarkdownV2",
     )
 
@@ -218,6 +219,24 @@ async def cmd_tutup(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔒 Warung DITUTUP — checkout diblok.\n"
         "Order yang udah masuk tetap bisa diproses. /buka untuk buka lagi."
+    )
+
+
+async def cmd_resetorders(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _is_owner(update):
+        return
+    with get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) c FROM orders").fetchone()["c"]
+    await update.message.reply_text(
+        f"⚠️ *Reset Data Order*\n\n"
+        f"Ini bakal HAPUS PERMANEN semua {n} order (+ item, riwayat edit, print job, "
+        f"bukti bayar). Menu, modifier, dan setting warung TIDAK kepengaruh.\n\n"
+        f"Yakin mau lanjut?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Ya, hapus semua order", callback_data="resetorders_confirm"),
+            InlineKeyboardButton("« Batal", callback_data="resetorders_cancel"),
+        ]]),
     )
 
 
@@ -602,6 +621,17 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )])
         await query.edit_message_reply_markup(InlineKeyboardMarkup(buttons))
 
+    elif data == "resetorders_confirm":
+        result = reset_orders()
+        await query.edit_message_text(
+            f"🗑️ Selesai — {result['orders_deleted']} order dihapus. "
+            f"ID order baru bakal mulai dari #1 lagi.\n\n"
+            f"Menu & setting warung aman, gak kesentuh."
+        )
+
+    elif data == "resetorders_cancel":
+        await query.edit_message_text("Dibatalkan, gak ada yang dihapus.")
+
     elif data.startswith("refresh:"):
         oid = int(data.split(":")[1])
         o = get_order(oid)
@@ -627,6 +657,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("tutup",   cmd_tutup))
     app.add_handler(CommandHandler("push",    cmd_push))
     app.add_handler(CommandHandler("admin",   cmd_admin))
+    app.add_handler(CommandHandler("resetorders", cmd_resetorders))
     app.add_handler(MessageHandler(filters.PHOTO, handle_payment_proof))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_fallback))

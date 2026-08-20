@@ -57,7 +57,12 @@ html, body {
 }
 .screen.active { display: flex; }
 
+/* Di layar lebar (Telegram Desktop, laptop outlet), 480px kaku bikin
+   app keliatan kartu kecil ngambang. Skalain dikit sampai batas nyaman
+   dibaca (720px) pake clamp, biar gak kekecilan tapi juga gak melar
+   jadi list yang aneh proporsinya. */
 @media (min-width: 481px) {
+  :root { --app-max-width: clamp(480px, 60vw, 720px); }
   .screen.active {
     box-shadow: 0 0 60px rgba(0, 0, 0, .5);
     border-left: 1px solid var(--line);
@@ -110,10 +115,13 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  /* Fullscreen mode (requestFullscreen) di Telegram bisa numpuk overlay
-     tombol close/minimize sendiri di atas — --tg-safe-area-inset-top nutup
-     itu; env(safe-area-inset-top) jaga-jaga buat notch/dynamic island OS. */
-  padding-top: calc(14px + var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)));
+  /* Fullscreen mode (requestFullscreen) di Telegram numpuk overlay tombol
+     close/minimize sendiri di atas. --tg-safe-area-inset-top cuma notch/
+     status-bar device (sering 0 di HP tanpa notch — makanya di desktop
+     udah bener tapi di HP masih ketiban); --tg-content-safe-area-inset-top
+     yang nutup tombol Telegram itu sendiri. env(safe-area-inset-top)
+     jaga-jaga buat notch/dynamic island OS kalau var TG kosong. */
+  padding-top: calc(14px + var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px));
   background: rgba(20, 22, 29, .82);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);

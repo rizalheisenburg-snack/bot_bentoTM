@@ -9,6 +9,19 @@ if (tg?.isVersionAtLeast?.("8.0")) {
   try { tg.requestFullscreen(); } catch { /* fallback diam-diam ke expand() */ }
 }
 
+// Fullscreen mode numpuk overlay tombol close/judul bawaan Telegram di atas.
+// Gabung safeAreaInset (notch/status bar) + contentSafeAreaInset (area yang
+// ketutup UI Telegram sendiri) ke CSS var --tg-safe-area-inset-top biar
+// header admin gak numpuk sama overlay itu.
+function syncSafeAreaInsetTop() {
+  const root = document.documentElement.style;
+  root.setProperty("--tg-safe-area-inset-top", (tg?.safeAreaInset?.top || 0) + "px");
+  root.setProperty("--tg-content-safe-area-inset-top", (tg?.contentSafeAreaInset?.top || 0) + "px");
+}
+syncSafeAreaInsetTop();
+tg?.onEvent?.("safeAreaChanged", syncSafeAreaInsetTop);
+tg?.onEvent?.("contentSafeAreaChanged", syncSafeAreaInsetTop);
+
 /* ── State ────────────────────────────────────────────────────── */
 const STATUSES = ["Diterima", "Diproses", "Siap", "Selesai", "Dibatalkan"];
 const NEXT_STATUS = { Diterima: "Diproses", Diproses: "Siap", Siap: "Selesai" };
