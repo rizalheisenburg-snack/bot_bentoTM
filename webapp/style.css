@@ -24,6 +24,7 @@
   --btn-text:  #ffffff;
   --radius:    20px;
   --shadow:    0 8px 24px rgba(0, 0, 0, .35);
+  --app-max-width: 480px;
 }
 
 html, body {
@@ -40,17 +41,18 @@ html, body {
 }
 
 /* ── Screens ──────────────────────────────────────────────────── */
-/* App ini dirancang mobile-first (lebar HP). Di browser desktop yang lebar,
-   dibatasi max-width & di-center supaya tetap proporsional kayak di HP,
-   bukan melar full lebar layar — max-width ini no-op di HP asli (viewport
-   udah lebih sempit dari 480px duluan). */
+/* App ini dirancang mobile-first (lebar HP) lewat --app-max-width. Di layar
+   sempit (tablet/desktop belum lebar) tetap dikunci selebar HP & di-center
+   biar proporsional, bukan melar — no-op di HP asli (viewport udah lebih
+   sempit dari 480px duluan). Begitu window cukup lebar (breakpoint desktop
+   di bawah), --app-max-width dilebarin biar grid menu bisa 4-6 kolom. */
 .screen {
   display: none;
   flex-direction: column;
   height: 100vh;   /* fallback buat WebView lama yang belum kenal dvh */
   height: 100dvh;
   overflow: hidden;
-  max-width: 480px;
+  max-width: var(--app-max-width);
   margin: 0 auto;
 }
 .screen.active { display: flex; }
@@ -61,6 +63,14 @@ html, body {
     border-left: 1px solid var(--line);
     border-right: 1px solid var(--line);
   }
+}
+
+/* Desktop lebar (Telegram Desktop dsb.) — manfaatin ruang kosong kiri-kanan
+   yang kebuang kalau dikunci selebar HP terus. */
+@media (min-width: 900px) {
+  :root { --app-max-width: 1120px; }
+  .section-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  .modifier-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
 /* ── Loading ──────────────────────────────────────────────────── */
@@ -320,7 +330,7 @@ html, body {
   left: 50%;
   transform: translateX(-50%);
   width: calc(100% - 32px);
-  max-width: 448px;
+  max-width: calc(var(--app-max-width) - 32px);
   background: rgba(29, 33, 44, .88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
